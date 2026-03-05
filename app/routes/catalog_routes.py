@@ -9,9 +9,13 @@ from app.utils.auth import get_current_user
 router = APIRouter()
 
 # Dependency to provide CatalogService instance
+
+from functools import lru_cache
+
+@lru_cache()
 def get_catalog_service():
-    # Provide appropriate initialization here. e.g.
     return CatalogService(ollama_base_urls=["http://localhost:11435"], cache_dir=Path("data/cache"))
+
 
 
 @router.get("/api/models/local")

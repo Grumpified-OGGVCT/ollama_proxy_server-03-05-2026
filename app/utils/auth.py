@@ -41,6 +41,19 @@ class AuthManager:
 
         return None
 
-def get_current_user():
-    # Placeholder for FastAPI dependency inject logic. Not defined in blueprint for some reason, so leaving as a dummy
-    return "admin"
+
+from fastapi import Request, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+security = HTTPBearer()
+
+def get_auth_manager():
+    # Cache or return a singleton of AuthManager
+    return AuthManager()
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security), auth_manager: AuthManager = Depends(get_auth_manager)):
+    token = credentials.credentials
+    user = auth_manager.validate_token(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return user
