@@ -1141,6 +1141,42 @@ async def admin_settings_post(
             model_update_interval = 10
     except (ValueError, TypeError):
         model_update_interval = 10
+
+    try:
+        max_retries = int(form_data.get("max_retries", current_settings.max_retries))
+        if max_retries < 0 or max_retries > 20:
+            max_retries = current_settings.max_retries
+    except (ValueError, TypeError):
+        max_retries = current_settings.max_retries
+
+    try:
+        retry_total_timeout_seconds = float(form_data.get("retry_total_timeout_seconds", current_settings.retry_total_timeout_seconds))
+        if retry_total_timeout_seconds < 0.1 or retry_total_timeout_seconds > 30.0:
+            retry_total_timeout_seconds = current_settings.retry_total_timeout_seconds
+    except (ValueError, TypeError):
+        retry_total_timeout_seconds = current_settings.retry_total_timeout_seconds
+
+    try:
+        retry_base_delay_ms = int(form_data.get("retry_base_delay_ms", current_settings.retry_base_delay_ms))
+        if retry_base_delay_ms < 1 or retry_base_delay_ms > 5000:
+            retry_base_delay_ms = current_settings.retry_base_delay_ms
+    except (ValueError, TypeError):
+        retry_base_delay_ms = current_settings.retry_base_delay_ms
+
+    try:
+        rate_limit_requests = int(form_data.get("rate_limit_requests", current_settings.rate_limit_requests))
+        if rate_limit_requests < 1:
+            rate_limit_requests = current_settings.rate_limit_requests
+    except (ValueError, TypeError):
+        rate_limit_requests = current_settings.rate_limit_requests
+
+    try:
+        rate_limit_window_minutes = int(form_data.get("rate_limit_window_minutes", current_settings.rate_limit_window_minutes))
+        if rate_limit_window_minutes < 1:
+            rate_limit_window_minutes = current_settings.rate_limit_window_minutes
+    except (ValueError, TypeError):
+        rate_limit_window_minutes = current_settings.rate_limit_window_minutes
+
     
     update_data.update({
         "branding_title": form_data.get("branding_title", current_settings.branding_title)[:128],
@@ -1150,6 +1186,13 @@ async def admin_settings_post(
         "redis_port": redis_port,
         "redis_username": (form_data.get("redis_username") or None)[:128] if form_data.get("redis_username") else None,
         "model_update_interval_minutes": model_update_interval,
+
+        "max_retries": max_retries,
+        "retry_total_timeout_seconds": retry_total_timeout_seconds,
+        "retry_base_delay_ms": retry_base_delay_ms,
+        "rate_limit_requests": rate_limit_requests,
+        "rate_limit_window_minutes": rate_limit_window_minutes,
+
         "allowed_ips": form_data.get("allowed_ips", "")[:2048],
         "denied_ips": form_data.get("denied_ips", "")[:2048],
         "blocked_ollama_endpoints": form_data.get("blocked_ollama_endpoints", "")[:1024],
