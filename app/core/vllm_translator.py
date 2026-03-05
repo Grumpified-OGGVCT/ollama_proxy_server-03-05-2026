@@ -136,7 +136,6 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                 finish_reason = data.get("choices", [{}])[0].get("finish_reason")
                 created_ts = data.get("created")
 
-
                 # --- Handle Tool Call for "thinking" or actual tool ---
                 if "tool_calls" in delta:
                     for t_call in delta["tool_calls"]:
@@ -145,15 +144,13 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                         if fn_name and not in_tool_call:
                             in_tool_call = True
                             is_think_tool = (fn_name == "think")
-                            start_tag = "<think>" if is_think_tool else f"<tool_call>
-{fn_name}("
+                            start_tag = "<think>" if is_think_tool else f"<tool_call>\n{fn_name}("
 
                             start_chunk = {
                                 "model": model_name, "created_at": get_iso_timestamp(created_ts),
                                 "message": {"role": "assistant", "content": start_tag}, "done": False
                             }
-                            yield (json.dumps(start_chunk) + '
-').encode('utf-8')
+                            yield (json.dumps(start_chunk) + "\n").encode("utf-8")
 
                         tool_call_part = t_call.get("function", {}).get("arguments", "")
                         if tool_call_part:
@@ -171,8 +168,7 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                             parsed_args = json.loads(tool_call_buffer)
                             if "steps" in parsed_args and isinstance(parsed_args["steps"], list):
                                 is_think_tool = True
-                                args = '
-'.join(parsed_args["steps"])
+                                args = "\n".join(parsed_args["steps"])
                             else:
                                 args = json.dumps(parsed_args, indent=2)
                         except:
@@ -183,23 +179,18 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                             yield (json.dumps({
                                 "model": model_name, "created_at": get_iso_timestamp(created_ts),
                                 "message": {"role": "assistant", "content": args}, "done": False,
-                            }) + '
-').encode('utf-8')
+                            }) + "\n").encode("utf-8")
                             yield (json.dumps({
                                 "model": model_name, "created_at": get_iso_timestamp(created_ts),
                                 "message": {"role": "assistant", "content": "</think>"}, "done": False
-                            }) + '
-').encode('utf-8')
+                            }) + "\n").encode("utf-8")
                             total_eval_text += args
                         else:
                             # It's a real tool block
                             yield (json.dumps({
                                 "model": model_name, "created_at": get_iso_timestamp(created_ts),
-                                "message": {"role": "assistant", "content": args + ")
-</tool_call>
-"}, "done": False,
-                            }) + '
-').encode('utf-8')
+                                "message": {"role": "assistant", "content": args + ")\n</tool_call>\n"}, "done": False,
+                            }) + "\n").encode("utf-8")
                             total_eval_text += args
 
                     except Exception as e:
@@ -210,6 +201,18 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                     if "content" not in delta or not delta.get("content"):
                         continue
 
+                # --- Handle regular content ---
+                if content := delta.get("content"):
+                    total_eval_text += content
+                    ollama_chunk = {
+                        "model": model_name, "created_at": get_iso_timestamp(created_ts),
+                        "message": {"role": "assistant", "content": content}, "done": False,
+                    }
+                    yield (json.dumps(ollama_chunk) + '\n').encode('utf-8')
+
+            except (json.JSONDecodeError, IndexError) as e:
+                logger.warning(f"Could not parse VLLM stream chunk: {line}. Error: {e}")
+                continue
     
     # Process any final data left in the buffer. This is a safeguard.
     if buffer.strip():
