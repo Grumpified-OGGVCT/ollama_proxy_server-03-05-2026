@@ -662,7 +662,32 @@ SUPPORTED ANNOTATION SCHEMAS:
                             }
                         }
 
-                        if (data.error) throw new Error(data.details || data.error);
+                                                if (data.error) {
+                            const errorHtml = `
+                                <div role="alert" aria-live="assertive" class="bg-red-50 border-l-4 border-red-500 p-4 my-2 rounded-r-md w-full">
+                                    <div class="flex">
+                                        <div class="flex-shrink-0">
+                                            <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd" />
+                                            </svg>
+                                        </div>
+                                        <div class="ml-3">
+                                            <p class="text-sm text-red-700 font-medium">
+                                                Error: ${data.details || data.error}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+
+                            // Make the error box take up the full space
+                            botMessageElement.className = "p-3 rounded-lg flex items-end self-start mr-12 bg-transparent w-full border border-red-200";
+                            botTextContainer.innerHTML = errorHtml;
+                            botIcon.classList.add('hidden'); // hide the bot icon
+
+                            // Important: don't throw, let the rest of the UI recover properly
+                            break;
+                        }
                     } catch (err) { console.warn("JSON parsing error in stream, probably a partial chunk. Buffering.", err) }
                 }
                 if (shouldScroll) {

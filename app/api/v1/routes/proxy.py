@@ -5,6 +5,7 @@ import datetime
 from typing import List, Tuple, Optional, Dict, Any
 from fastapi import APIRouter, Depends, Request, Response, HTTPException, status
 from fastapi.responses import StreamingResponse, JSONResponse
+import httpx
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +20,7 @@ from app.core.vllm_translator import (
     translate_ollama_to_vllm_chat,
     translate_ollama_to_vllm_embeddings,
     translate_vllm_to_ollama_embeddings,
+    translate_vllm_to_ollama_chat,
     vllm_stream_to_ollama_stream
 )
 
@@ -93,19 +95,21 @@ async def _send_backend_request(
     backend_url = f"{normalized_url}/api/{path}"
 
     request_headers = {}
-    
+
     for k, v in headers.items():
         k_lower = k.lower()
-        if k_lower in ('host', 'connection', 'keep-alive', 'proxy-authenticate', 
-                       'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade'):
+        if k_lower in ('host', 'connection', 'keep-alive', 'proxy-authenticate',
+                       'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade',
+                       'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-real-ip',
+                       'cookie', 'authorization'):
             continue
         if k_lower == 'content-length':
             continue
         request_headers[k] = v
-    
+
     if body_bytes:
         request_headers['content-length'] = str(len(body_bytes))
-    
+
     if server.encrypted_api_key:
         api_key = decrypt_data(server.encrypted_api_key)
         if api_key:
@@ -143,7 +147,7 @@ def _extract_tokens_from_chunk(chunk_data: Dict[str, Any]) -> Dict[str, Optional
         "completion_tokens": None,
         "total_tokens": None,
     }
-    
+
     # Ollama format - check various field names
     if "prompt_eval_count" in chunk_data:
         tokens["prompt_tokens"] = chunk_data.get("prompt_eval_count")
@@ -151,11 +155,11 @@ def _extract_tokens_from_chunk(chunk_data: Dict[str, Any]) -> Dict[str, Optional
         tokens["prompt_tokens"] = chunk_data.get("prompt_count")
     if "eval_count" in chunk_data:
         tokens["completion_tokens"] = chunk_data.get("eval_count")
-    
+
     # Calculate total if we have both
     if tokens["prompt_tokens"] is not None and tokens["completion_tokens"] is not None:
         tokens["total_tokens"] = tokens["prompt_tokens"] + tokens["completion_tokens"]
-    
+
     # vLLM/OpenAI format (translated)
     if "usage" in chunk_data and chunk_data["usage"]:
         usage = chunk_data["usage"]
@@ -163,7 +167,7 @@ def _extract_tokens_from_chunk(chunk_data: Dict[str, Any]) -> Dict[str, Optional
             tokens["prompt_tokens"] = usage.get("prompt_tokens")
             tokens["completion_tokens"] = usage.get("completion_tokens")
             tokens["total_tokens"] = usage.get("total_tokens")
-    
+
     # Final chunk with done=True often has the complete stats
     if chunk_data.get("done"):
         if "prompt_eval_count" in chunk_data:
@@ -172,10 +176,10 @@ def _extract_tokens_from_chunk(chunk_data: Dict[str, Any]) -> Dict[str, Optional
             tokens["prompt_tokens"] = chunk_data.get("prompt_count")
         if "eval_count" in chunk_data:
             tokens["completion_tokens"] = chunk_data.get("eval_count")
-        
+
         if tokens["prompt_tokens"] is not None and tokens["completion_tokens"] is not None:
             tokens["total_tokens"] = tokens["prompt_tokens"] + tokens["completion_tokens"]
-    
+
     return tokens
 
 
@@ -196,7 +200,7 @@ async def _update_log_with_tokens_async(
         logger.debug(f"Failed to update tokens for log {log_id}: {e}")
 
 
-async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer], body_bytes: bytes = "", 
+async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer], body_bytes: bytes = "",
                         api_key_id: Optional[int] = None, log_id: Optional[int] = None) -> Tuple[Response, OllamaServer]:
     """
     Core reverse proxy logic with retry support and token tracking.
@@ -210,19 +214,19 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
         base_delay_ms=app_settings.retry_base_delay_ms
     )
 
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in 
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in
                ('host', 'connection', 'keep-alive', 'proxy-authenticate',
                 'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade', 'content-length')}
 
     logger.info(f"_reverse_proxy called with {len(servers)} total server(s), filtering to active...")
-    
+
     candidate_servers = [
-        s for s in servers 
+        s for s in servers
         if s.is_active and _is_server_healthy_cached(s.id)
     ]
-    
+
     logger.info(f"After filtering: {len(candidate_servers)} active server(s): {[s.name for s in candidate_servers]}")
-    
+
     if not candidate_servers:
         candidate_servers = [s for s in servers if s.is_active]
         if not candidate_servers:
@@ -235,10 +239,10 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     if not hasattr(request.app.state, 'backend_server_index'):
         request.app.state.backend_server_index = 0
         logger.info("Initialized backend_server_index to 0")
-    
+
     current_index = request.app.state.backend_server_index % max(1, len(candidate_servers))
     request.app.state.backend_server_index = (current_index + 1) % max(1, len(candidate_servers))
-    
+
     logger.info(f"Round-robin: current_index={current_index}, next_index will be {request.app.state.backend_server_index}, candidate_count={len(candidate_servers)}")
 
     servers_tried = []
@@ -246,7 +250,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
     for server_attempt in range(len(candidate_servers)):
         safe_index = (current_index + server_attempt) % len(candidate_servers)
         chosen_server = candidate_servers[safe_index]
-        
+
         logger.info(f"Server attempt {server_attempt + 1}/{len(candidate_servers)}: selected '{chosen_server.name}' at index {safe_index}")
 
         servers_tried.append(chosen_server.name)
@@ -271,9 +275,9 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 continue
 
         logger.info(f"Using Ollama branch with retry logic for server '{chosen_server.name}'")
-        
+
         first_attempt_start = asyncio.get_event_loop().time()
-        
+
         try:
             backend_response = await _send_backend_request(
                 http_client=http_client,
@@ -284,14 +288,14 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                 query_params=request.query_params,
                 body_bytes=body_bytes
             )
-            
+
             first_attempt_duration = asyncio.get_event_loop().time() - first_attempt_start
-            
+
             _update_health_cache(chosen_server.id, True)
-            
+
             # Check if this is a streaming response
             is_streaming = _is_streaming_response(backend_response)
-            
+
             if is_streaming and log_id:
                 # Wrap for token tracking
                 wrapped_response = _wrap_response_for_token_tracking(
@@ -324,11 +328,11 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
                         pass
                 # Return original response if we couldn't extract tokens
                 return backend_response, chosen_server
-            
+
         except Exception as first_error:
             _update_health_cache(chosen_server.id, False)
             logger.debug(f"Direct attempt failed for '{chosen_server.name}', using retry logic: {first_error}")
-            
+
             retry_result = await retry_with_backoff(
                 _send_backend_request,
                 http_client=http_client,
@@ -355,7 +359,7 @@ async def _reverse_proxy(request: Request, path: str, servers: List[OllamaServer
 
                 # Check if streaming
                 is_streaming = _is_streaming_response(backend_response)
-                
+
                 if is_streaming and log_id:
                     wrapped_response = _wrap_response_for_token_tracking(
                         backend_response, chosen_server, api_key_id, log_id, path
@@ -414,7 +418,7 @@ def _wrap_response_for_token_tracking(
     path: str = ""
 ) -> StreamingResponse:
     """Wraps a streaming response to capture token usage from chunks."""
-    
+
     async def token_tracking_stream():
         buffer = ""
         accumulated_tokens = {
@@ -423,7 +427,7 @@ def _wrap_response_for_token_tracking(
             "total_tokens": None,
         }
         tokens_finalized = False
-        
+
         try:
             async for chunk in backend_response.aiter_raw():
                 try:
@@ -431,22 +435,22 @@ def _wrap_response_for_token_tracking(
                 except UnicodeDecodeError:
                     yield chunk
                     continue
-                
+
                 # CRITICAL: Yield the original chunk immediately to prevent hanging
                 # But also process it for token tracking
                 yield chunk
-                
+
                 # Process for token tracking (after yielding to not block)
                 buffer += chunk_text
-                
+
                 # Process complete lines
                 lines = buffer.split('\n')
                 buffer = lines.pop() if buffer and not chunk_text.endswith('\n') else ""
-                
+
                 for line in lines:
                     if not line.strip():
                         continue
-                    
+
                     # Try to parse as JSON (Ollama format)
                     try:
                         data_str = line
@@ -454,17 +458,17 @@ def _wrap_response_for_token_tracking(
                             data_str = line[6:]
                             if data_str == '[DONE]':
                                 continue
-                        
+
                         data = json.loads(data_str)
-                        
+
                         # Extract tokens from this chunk
                         chunk_tokens = _extract_tokens_from_chunk(data)
-                        
+
                         # Update accumulated tokens (prefer non-None values)
                         for key in accumulated_tokens:
                             if chunk_tokens.get(key) is not None:
                                 accumulated_tokens[key] = chunk_tokens[key]
-                        
+
                         # If this is the final chunk, update the log
                         if data.get("done") and log_id and not tokens_finalized:
                             tokens_finalized = True
@@ -475,10 +479,10 @@ def _wrap_response_for_token_tracking(
                                 accumulated_tokens["completion_tokens"],
                                 accumulated_tokens["total_tokens"]
                             ))
-                        
+
                     except json.JSONDecodeError:
                         pass  # Not JSON, skip token extraction
-            
+
             # Process any remaining buffer
             if buffer.strip():
                 try:
@@ -493,7 +497,7 @@ def _wrap_response_for_token_tracking(
                             for key in accumulated_tokens:
                                 if chunk_tokens.get(key) is not None:
                                     accumulated_tokens[key] = chunk_tokens[key]
-                            
+
                             asyncio.create_task(_update_log_with_tokens_async(
                                 log_id,
                                 accumulated_tokens["prompt_tokens"],
@@ -502,16 +506,16 @@ def _wrap_response_for_token_tracking(
                             ))
                 except json.JSONDecodeError:
                     pass
-                
+
         except Exception as e:
             logger.error(f"Error in token tracking stream: {e}")
             # Don't re-raise, just stop processing tokens
-    
+
     # Return StreamingResponse with proper headers
     response_headers = dict(backend_response.headers)
     # Remove content-length since we're streaming
     response_headers.pop('content-length', None)
-    
+
     return StreamingResponse(
         token_tracking_stream(),
         status_code=backend_response.status_code,
@@ -524,14 +528,14 @@ def _is_streaming_response(response: Response) -> bool:
     """Check if a response is streaming based on headers."""
     content_type = response.headers.get('content-type', '')
     transfer_encoding = response.headers.get('transfer-encoding', '')
-    
+
     if 'text/event-stream' in content_type:
         return True
     if 'chunked' in transfer_encoding.lower():
         return True
     if 'application/x-ndjson' in content_type:
         return True
-    
+
     return False
 
 
@@ -547,15 +551,17 @@ async def _proxy_to_vllm(
     Handles proxying a request to a vLLM server with token tracking.
     """
     http_client: AsyncClient = request.app.state.http_client
-    
+
     try:
         ollama_payload = json.loads(body_bytes) if body_bytes else {}
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
     model_name = ollama_payload.get("model")
-    
-    headers = {}
+
+    headers = {
+        "Content-Type": "application/json"
+    }
     if server.encrypted_api_key:
         api_key = decrypt_data(server.encrypted_api_key)
         if api_key:
@@ -569,7 +575,7 @@ async def _proxy_to_vllm(
         vllm_payload = translate_ollama_to_vllm_embeddings(ollama_payload)
     else:
         raise HTTPException(status_code=404, detail=f"Endpoint '/api/{path}' not supported for vLLM servers.")
-        
+
     backend_url = f"{server.url.rstrip('/')}/{vllm_path}"
     is_streaming = vllm_payload.get("stream", False)
 
@@ -582,15 +588,27 @@ async def _proxy_to_vllm(
                     "total_tokens": None,
                 }
                 tokens_finalized = False
-                
+
                 async with http_client.stream("POST", backend_url, json=vllm_payload, timeout=600.0, headers=headers) as vllm_response:
                     if vllm_response.status_code != 200:
                         error_body = await vllm_response.aread()
-                        logger.error(f"vLLM server error ({vllm_response.status_code}): {error_body.decode()}")
-                        error_chunk = {"error": f"vLLM server error: {error_body.decode()}"}
+                        error_msg = error_body.decode()
+                        logger.error(f"vLLM server error ({vllm_response.status_code}): {error_msg}")
+                        try:
+                            error_json = json.loads(error_msg)
+                            if "error" in error_json and isinstance(error_json["error"], dict) and "message" in error_json["error"]:
+                                error_msg = error_json["error"]["message"]
+                        except Exception:
+                            pass
+
+                        error_chunk = {
+                            "error": f"vLLM server error: {error_msg}",
+                            "model": model_name,
+                            "done": True
+                        }
                         yield (json.dumps(error_chunk) + '\n').encode('utf-8')
                         return
-                    
+
                     buffer = ""
                     async for chunk in vllm_response.aiter_raw():
                         try:
@@ -598,37 +616,37 @@ async def _proxy_to_vllm(
                         except UnicodeDecodeError:
                             yield chunk
                             continue
-                        
+
                         # CRITICAL: Yield immediately to prevent hanging
                         yield chunk
-                        
+
                         # Process for token tracking
                         buffer += chunk_text
                         lines = buffer.split('\n')
                         buffer = lines.pop() if buffer and not chunk_text.endswith('\n') else ""
-                        
+
                         for line in lines:
                             if not line.strip():
                                 continue
-                                
+
                             # Check for SSE data prefix
                             data_content = line
                             if line.startswith('data: '):
                                 data_content = line[6:]
-                                
+
                             if data_content == '[DONE]':
                                 continue
-                            
+
                             try:
                                 data = json.loads(data_content)
-                                
+
                                 # Extract usage info if present
                                 if "usage" in data and data["usage"]:
                                     usage = data["usage"]
                                     accumulated_tokens["prompt_tokens"] = usage.get("prompt_tokens")
                                     accumulated_tokens["completion_tokens"] = usage.get("completion_tokens")
                                     accumulated_tokens["total_tokens"] = usage.get("total_tokens")
-                                
+
                                 # Check for done signal
                                 choices = data.get("choices", [])
                                 if choices and choices[0].get("finish_reason"):
@@ -642,7 +660,7 @@ async def _proxy_to_vllm(
                                         ))
                             except json.JSONDecodeError:
                                 pass
-            
+
             return StreamingResponse(
                 stream_generator(),
                 media_type="application/x-ndjson",
@@ -652,23 +670,31 @@ async def _proxy_to_vllm(
             response = await http_client.post(backend_url, json=vllm_payload, timeout=600.0, headers=headers)
             response.raise_for_status()
             vllm_data = response.json()
-            
+
             # Extract and log tokens for non-streaming response
             if log_id:
                 usage = vllm_data.get("usage", {})
                 prompt_tokens = usage.get("prompt_tokens")
                 completion_tokens = usage.get("completion_tokens")
                 total_tokens = usage.get("total_tokens")
-                
+
                 asyncio.create_task(_update_log_with_tokens_async(
                     log_id,
                     prompt_tokens, completion_tokens, total_tokens
                 ))
-            
+
             if path == "embeddings":
                 ollama_data = translate_vllm_to_ollama_embeddings(vllm_data)
                 return JSONResponse(content=ollama_data)
-            raise NotImplementedError("Non-streaming chat for vLLM not yet implemented.")
+            elif path == "chat":
+                ollama_data = translate_vllm_to_ollama_chat(vllm_data)
+
+                # Model name comes back as the mapped vLLM model name, overwrite it with original requested model name
+                if model_name:
+                    ollama_data["model"] = model_name
+
+                return JSONResponse(content=ollama_data)
+            raise NotImplementedError(f"Non-streaming {path} for vLLM not yet implemented.")
 
     except httpx.HTTPStatusError as e:
         error_detail = e.response.text
@@ -697,7 +723,7 @@ async def federate_models(
     for server in servers:
         logger.info(f"/tags: Processing server '{server.name}' (type: {server.server_type})")
         models_list = server.available_models or []
-        
+
         raw_models_repr = repr(models_list)
         if len(raw_models_repr) > 300:
             raw_models_repr = raw_models_repr[:300] + '... (truncated)'
@@ -724,7 +750,7 @@ async def federate_models(
                 model_count_on_server += 1
             else:
                 logger.warning(f"/tags: Invalid model format found for server '{server.name}': {model}")
-        
+
         logger.info(f"/tags: Added {model_count_on_server} models from server '{server.name}'")
 
     logger.info(f"/tags: Total unique models before adding 'auto': {len(all_models)}")
@@ -749,7 +775,7 @@ async def federate_models(
         asyncio.create_task(_async_log_usage(db, api_key.id, "/api/tags", 200, None, None))
     except Exception as e:
         logger.debug(f"Failed to queue usage log: {e}")
-    
+
     final_model_list = list(all_models.values())
     logger.info("--- /tags endpoint: Finished model federation ---")
 
@@ -757,11 +783,11 @@ async def federate_models(
 
 
 async def _async_log_usage(
-    db: AsyncSession, 
-    api_key_id: int, 
-    endpoint: str, 
-    status_code: int, 
-    server_id: Optional[int], 
+    db: AsyncSession,
+    api_key_id: int,
+    endpoint: str,
+    status_code: int,
+    server_id: Optional[int],
     model: Optional[str] = None,
     prompt_tokens: Optional[int] = None,
     completion_tokens: Optional[int] = None,
@@ -793,9 +819,9 @@ async def _async_log_usage(
 
 async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional[str]:
     """Selects the best model based on metadata and request content."""
-    
+
     has_images = "images" in body and body["images"]
-    
+
     prompt_content = ""
     if "prompt" in body:
         prompt_content = body["prompt"]
@@ -823,7 +849,7 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
     if has_images:
         logger.info("Auto-routing: Filtering for models that support images.")
         candidate_models = [m for m in candidate_models if m.supports_images]
-    
+
     if contains_code:
         logger.info("Auto-routing: Filtering for code models.")
         code_models = [m for m in candidate_models if m.is_code_model]
@@ -845,7 +871,7 @@ async def _select_auto_model(db: AsyncSession, body: Dict[str, Any]) -> Optional
 
     best_model = candidate_models[0]
     logger.info(f"Auto-routing selected model '{best_model.model_name}' with priority {best_model.priority}.")
-    
+
     return best_model.model_name
 
 
@@ -889,7 +915,7 @@ async def proxy_ollama(
     if model_name and isinstance(body, dict) and "think" in body:
         model_name_lower = model_name.lower()
         supported_think_models = ["qwen", "gpt-oss", "deepseek"]
-        
+
         is_supported = any(keyword in model_name_lower for keyword in supported_think_models)
 
         if is_supported:
@@ -901,7 +927,7 @@ async def proxy_ollama(
             logger.warning(f"Model '{model_name}' is not in the known list for 'think' support. Removing 'think' parameter.")
             del body["think"]
             body_bytes = json.dumps(body).encode('utf-8')
-            
+
     # Handle 'auto' model routing
     if model_name == "auto":
         chosen_model_name = await _select_auto_model(db, body)
@@ -915,7 +941,7 @@ async def proxy_ollama(
         body_bytes = json.dumps(body).encode('utf-8')
 
     logger.info(f"proxy_ollama: Received {len(servers)} server(s) from get_active_servers dependency: {[s.name for s in servers]}")
-    
+
     candidate_servers = servers
     if model_name:
         logger.info(f"proxy_ollama: Looking for servers with model '{model_name}'")
@@ -939,14 +965,14 @@ async def proxy_ollama(
 
     # Create initial usage log entry (without tokens - will be updated later for streaming)
     is_token_trackable_endpoint = path in ("generate", "chat", "embeddings")
-    
+
     log_id = None
     if is_token_trackable_endpoint:
         log_id = await _async_log_usage(
             db, api_key.id, f"/api/{path}", 200, None, model_name,
             None, None, None
         )
-    
+
     # Proxy to one of the candidate servers
     response, chosen_server = await _reverse_proxy(
         request, path, candidate_servers, body_bytes,
