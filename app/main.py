@@ -38,6 +38,8 @@ from app.database.migrations import run_all_migrations
 from app.crud import user_crud, server_crud, settings_crud
 from app.schema.user import UserCreate
 from app.schema.server import ServerCreate
+from app.routes.catalog_routes import router as catalog_router
+from app.middleware.security import add_security_headers_middleware
 from app.schema.settings import AppSettingsModel
 
 # --- Logging and Passlib setup ---
@@ -234,6 +236,8 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])
 app.include_router(proxy_router, prefix="/api", tags=["Ollama Proxy"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
+app.include_router(catalog_router, tags=["Catalog"])
+add_security_headers_middleware(app)
 app.include_router(playground_chat_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(playground_embedding_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 
