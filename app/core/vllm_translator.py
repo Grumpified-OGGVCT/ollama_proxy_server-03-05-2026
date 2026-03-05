@@ -136,7 +136,15 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                 finish_reason = data.get("choices", [{}])[0].get("finish_reason")
                 created_ts = data.get("created")
 
+
                 # --- Handle Tool Call for "thinking" or actual tool ---
+                # NOTE (Architecture): This injects a `<tool_call>` wrapper into the streamed text output.
+                # PROS: Allows downstream UI clients (like the Model Playground) to easily regex-split
+                #       and render collapsible tool call boxes exactly like `<think>` traces.
+                # CONS: The stream `content` becomes visually mutated from the raw LLM output. Clients that
+                #       expect purely the literal LLM conversational response without debug tags will
+                #       need to manually strip out `<tool_call>.*?</tool_call>` elements in their view logic.
+
                 if "tool_calls" in delta:
                     for t_call in delta["tool_calls"]:
                         fn_name = t_call.get("function", {}).get("name")
