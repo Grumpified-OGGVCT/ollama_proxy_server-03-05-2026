@@ -30,7 +30,7 @@
     <div class="card-header p-2 md:p-4 flex items-center justify-between flex-shrink-0">
         <div class="flex items-center gap-2 md:gap-4">
             <h2 class="text-xl font-bold">Chat</h2>
-            <div id="system-prompt-indicator" class="hidden items-center gap-1 text-xs px-2 py-1 bg-sky-500/20 text-sky-300 rounded-full cursor-pointer" title="A system prompt is active. Click to edit.">
+            <div id="system-prompt-indicator" role="button" aria-label="Edit active system prompt" tabindex="0" class="hidden items-center gap-1 text-xs px-2 py-1 bg-sky-500/20 text-sky-300 rounded-full cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-white" title="A system prompt is active. Click to edit.">
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0 3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                 <span>System Prompt</span>
             </div>
@@ -38,13 +38,13 @@
         <div class="flex items-center gap-2">
             <div id="thinking-toggle-container" class="hidden md:flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Enable model thinking. This will show the reasoning trace before the final answer.">
                 <span class="text-gray-400">Thinking</span>
-                <button type="button" id="thinking-toggle" class="relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
+                <button type="button" id="thinking-toggle" aria-pressed="false" aria-label="Toggle thinking mode" class="relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white bg-gray-600">
                     <span id="thinking-toggle-knob" class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
                 </button>
             </div>
             <div id="thinking-level-container" class="hidden md:flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Set the thinking trace length for GPT-OSS models.">
                 <span class="text-gray-400">Think Level</span>
-                <select id="thinking-level-select" class="px-2 py-1 rounded-md text-sm">
+                <select id="thinking-level-select" aria-label="Select thinking level" class="px-2 py-1 rounded-md text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-white">
                     <option value="low">Low</option>
                     <option value="medium" selected>Medium</option>
                     <option value="high">High</option>
@@ -52,12 +52,12 @@
             </div>
             <div id="image-annotation-toggle-container" class="hidden md:flex items-center gap-2 text-sm pr-2 border-r border-gray-600" title="Toggle image annotation mode. This adds a special system prompt to enable object detection and bounding box drawing on images.">
                 <span class="text-gray-400">Annotate</span>
-                <button type="button" id="image-annotation-toggle" class="relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none bg-gray-600">
+                <button type="button" id="image-annotation-toggle" aria-pressed="false" aria-label="Toggle image annotation mode" class="relative inline-flex flex-shrink-0 h-6 w-11 border-2 border-transparent rounded-full cursor-pointer transition-colors ease-in-out duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-white bg-gray-600">
                     <span id="image-annotation-toggle-knob" class="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transform ring-0 transition ease-in-out duration-200 translate-x-0"></span>
                 </button>
             </div>
             <div class="relative" id="add-message-menu-container">
-                <button id="add-message-btn" title="Add Message" class="p-2 rounded hover:bg-white/10">
+                <button id="add-message-btn" aria-haspopup="true" aria-expanded="false" title="Add Message" class="p-2 rounded hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 </button>
                 <div id="add-message-dropdown" class="absolute bottom-full right-0 mb-2 w-48 rounded-md shadow-lg bg-gray-800 ring-1 ring-black ring-opacity-5 hidden z-10">
@@ -65,11 +65,15 @@
                     <a href="#" id="add-ai-msg-btn" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700">Add AI Message</a>
                 </div>
             </div>
-            <button id="system-prompt-btn" title="Set System Prompt" class="p-2 rounded hover:bg-white/10">
+            <button id="system-prompt-btn" aria-label="Set system prompt" title="Set System Prompt" class="p-2 rounded hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0 3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
             </button>
-            <select id="model-selector" class="px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
+            <select id="model-selector" aria-label="Select a model" class="px-3 py-2 rounded-md shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm">
                 {% if model_groups %}
+                <optgroup label="Automated Routing">
+                    <option value="auto">Auto (Best Available Model)</option>
+                </optgroup>
+
                     {% for server_name, models in model_groups.items() %}
                         <optgroup label="{{ server_name }}">
                         {% for model in models %}
@@ -81,17 +85,17 @@
                     <option value="" disabled>No chat models found</option>
                 {% endif %}
             </select>
-            <button id="test-prompts-btn" title="Test Prompts" class="p-2 rounded hover:bg-white/10">
+            <button id="test-prompts-btn" aria-label="Open test prompts" title="Test Prompts" class="p-2 rounded hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white">
                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path></svg>
             </button>
             <input type="file" id="import-chat-input" class="hidden" accept=".json">
-            <button id="import-chat-btn" title="Import Chat" class="p-2 rounded hover:bg-white/10">
+            <button id="import-chat-btn" aria-label="Import Chat" title="Import Chat" class="p-2 rounded hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
             </button>
-            <button id="export-chat-btn" title="Export Chat" class="p-2 rounded hover:bg-white/10">
+            <button id="export-chat-btn" aria-label="Export Chat" title="Export Chat" class="p-2 rounded hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
             </button>
-            <button id="clear-chat-btn" class="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 focus:outline-none">Clear</button>
+            <button id="clear-chat-btn" aria-label="Clear chat" class="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-white">Clear</button>
         </div>
     </div>
 
@@ -112,15 +116,15 @@
         <div id="doc-previews" class="doc-previews"></div>
         <div id="image-previews" class="image-previews"></div>
         <form id="chat-form" class="flex items-end gap-2 md:gap-4">
-            <button type="button" id="attach-img-btn" class="p-2 rounded-md hover:bg-white/10 flex-shrink-0" title="Attach Image">
+            <button type="button" id="attach-img-btn" aria-label="Attach Image" class="p-2 rounded-md hover:bg-white/10 flex-shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-white" title="Attach Image">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
             </button>
             <input type="file" id="image-input" class="hidden" multiple accept="image/*">
-            <button type="button" id="attach-doc-btn" class="p-2 rounded-md hover:bg-white/10 flex-shrink-0" title="Attach Document">
+            <button type="button" id="attach-doc-btn" aria-label="Attach Document" class="p-2 rounded-md hover:bg-white/10 flex-shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-white" title="Attach Document">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
             </button>
             <input type="file" id="doc-input" class="hidden" multiple accept=".txt,.md,.json,.csv,.py,.js,.html,.css,.xml,.yaml,.yml,.log,.ini,.toml,.sh,.bat">
-            <textarea id="message-input" placeholder="Type your message here, or paste an image..." rows="1" class="flex-grow block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm resize-none"></textarea>
+            <textarea id="message-input" aria-label="Message text" placeholder="Type your message here, or paste an image..." rows="1" class="flex-grow block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] sm:text-sm resize-none"></textarea>
             <button type="submit" id="send-btn" class="justify-center py-2 px-6 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[var(--color-primary-600)] hover:bg-[var(--color-primary-700)] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-primary-500)] self-end">Send</button>
         </form>
     </div>
@@ -732,7 +736,7 @@ SUPPORTED ANNOTATION SCHEMAS:
         container.dataset.rawContent = rawContent;
 
         // Split content by special tags, keeping the tags as delimiters. This is more robust.
-        const parts = contentString.split(/(<think>[\s\S]*?<\/think>|<think>[\s\S]*|<annotate>[\s\S]*?<\/annotate>)/g);
+        const parts = contentString.split(/(<think>[\s\S]*?<\/think>|<think>[\s\S]*|<tool_call>[\s\S]*?<\/tool_call>|<tool_call>[\s\S]*|<tool_response>[\s\S]*?<\/tool_response>|<tool_response>[\s\S]*|<annotate>[\s\S]*?<\/annotate>)/g);
         
         let finalHtml = '';
         for (const part of parts) {
@@ -745,6 +749,23 @@ SUPPORTED ANNOTATION SCHEMAS:
                 } else { // Unclosed (streaming) block
                     const thinkContent = part.slice(7);
                     finalHtml += `<details class="think-block" open><summary class="flex items-center gap-2">Thinking <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></summary><div>${marked.parse(thinkContent.trim())}</div></details>`;
+                }
+
+            } else if (part.startsWith('<tool_call>')) {
+                if (part.endsWith('</tool_call>')) {
+                    const toolContent = part.slice(11, -12);
+                    finalHtml += `<details class="think-block bg-indigo-900/20 border-indigo-500/30"><summary class="text-indigo-400">Tool Call</summary><div>${marked.parse(toolContent.trim())}</div></details>`;
+                } else {
+                    const toolContent = part.slice(11);
+                    finalHtml += `<details class="think-block bg-indigo-900/20 border-indigo-500/30" open><summary class="flex items-center gap-2 text-indigo-400">Calling Tool <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></summary><div>${marked.parse(toolContent.trim())}</div></details>`;
+                }
+            } else if (part.startsWith('<tool_response>')) {
+                if (part.endsWith('</tool_response>')) {
+                    const respContent = part.slice(15, -16);
+                    finalHtml += `<details class="think-block bg-emerald-900/20 border-emerald-500/30"><summary class="text-emerald-400">Tool Response</summary><div>${marked.parse(respContent.trim())}</div></details>`;
+                } else {
+                    const respContent = part.slice(15);
+                    finalHtml += `<details class="think-block bg-emerald-900/20 border-emerald-500/30" open><summary class="flex items-center gap-2 text-emerald-400">Receiving Response <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></summary><div>${marked.parse(respContent.trim())}</div></details>`;
                 }
             } else if (part.startsWith('<annotate>')) {
                 const annotationJson = part.slice(10, -11);

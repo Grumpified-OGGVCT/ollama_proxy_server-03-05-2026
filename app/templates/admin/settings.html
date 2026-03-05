@@ -155,9 +155,43 @@
                     <label for="model_update_interval_minutes" class="block text-sm font-medium text-current">Model Refresh Interval (minutes)</label>
                     <input type="number" name="model_update_interval_minutes" id="model_update_interval_minutes" value="{{ settings.model_update_interval_minutes }}" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)]">
                 </div>
+                <div>
+                    <label for="rate_limit_requests" class="block text-sm font-medium text-current">Rate Limit Requests</label>
+                    <input type="number" name="rate_limit_requests" id="rate_limit_requests" value="{{ settings.rate_limit_requests }}" aria-label="Rate Limit Requests" aria-describedby="rate_limit_requests_help" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] focus-visible:ring-2">
+                    <p id="rate_limit_requests_help" class="mt-1 text-xs text-gray-400">Max requests allowed per window.</p>
+                </div>
+                <div>
+                    <label for="rate_limit_window_minutes" class="block text-sm font-medium text-current">Rate Limit Window (minutes)</label>
+                    <input type="number" name="rate_limit_window_minutes" id="rate_limit_window_minutes" value="{{ settings.rate_limit_window_minutes }}" aria-label="Rate Limit Window in minutes" aria-describedby="rate_limit_window_minutes_help" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] focus-visible:ring-2">
+                    <p id="rate_limit_window_minutes_help" class="mt-1 text-xs text-gray-400">Time window for rate limiting in minutes.</p>
+                </div>
+
             </div>
         </div>
         
+
+        <!-- Backend Retry Configuration -->
+        <div>
+            <h2 class="card-header text-xl font-bold mb-4 pb-2">Backend Retry Configuration</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div>
+                    <label for="max_retries" class="block text-sm font-medium text-current">Max Retries</label>
+                    <input type="number" name="max_retries" id="max_retries" value="{{ settings.max_retries }}" aria-label="Maximum number of retries" aria-describedby="max_retries_help" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] focus-visible:ring-2">
+                    <p id="max_retries_help" class="mt-1 text-xs text-gray-400">Maximum number of retry attempts when a backend server request fails.</p>
+                </div>
+                <div>
+                    <label for="retry_total_timeout_seconds" class="block text-sm font-medium text-current">Retry Total Timeout (seconds)</label>
+                    <input type="number" step="0.1" name="retry_total_timeout_seconds" id="retry_total_timeout_seconds" value="{{ settings.retry_total_timeout_seconds }}" aria-label="Retry Total Timeout in seconds" aria-describedby="retry_total_timeout_seconds_help" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] focus-visible:ring-2">
+                    <p id="retry_total_timeout_seconds_help" class="mt-1 text-xs text-gray-400">Total time budget (in seconds) for all retry attempts.</p>
+                </div>
+                <div>
+                    <label for="retry_base_delay_ms" class="block text-sm font-medium text-current">Retry Base Delay (ms)</label>
+                    <input type="number" name="retry_base_delay_ms" id="retry_base_delay_ms" value="{{ settings.retry_base_delay_ms }}" aria-label="Retry Base Delay in milliseconds" aria-describedby="retry_base_delay_ms_help" class="mt-1 block w-full px-3 py-2 rounded-md shadow-sm focus:outline-none focus:ring-[var(--color-primary-500)] focus:border-[var(--color-primary-500)] focus-visible:ring-2">
+                    <p id="retry_base_delay_ms_help" class="mt-1 text-xs text-gray-400">Base delay in milliseconds for exponential backoff between retries.</p>
+                </div>
+            </div>
+        </div>
+
         <!-- IP Filtering -->
         <div>
             <h2 class="card-header text-xl font-bold mb-4 pb-2">IP Filtering</h2>
