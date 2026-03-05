@@ -34,22 +34,49 @@ def translate_ollama_to_vllm_chat(ollama_payload: Dict[str, Any]) -> Dict[str, A
         "model": ollama_payload.get("model"),
         "stream": ollama_payload.get("stream", False),
     }
-    
+
+    options = ollama_payload.get("options", {})
+    if vllm_payload["stream"]:
+        vllm_payload["stream_options"] = {"include_usage": True}
+
+    if options:
+        if "temperature" in options:
+            vllm_payload["temperature"] = options["temperature"]
+        if "top_p" in options:
+            vllm_payload["top_p"] = options["top_p"]
+        if "top_k" in options:
+            vllm_payload["top_k"] = options["top_k"]
+        if "num_predict" in options:
+            vllm_payload["max_tokens"] = options["num_predict"]
+        if "seed" in options:
+            vllm_payload["seed"] = options["seed"]
+        if "stop" in options:
+            vllm_payload["stop"] = options["stop"]
+
     messages = ollama_payload.get("messages", [])
-    
+
     # Check for and handle Chain-of-Thought prompt for vLLM
     final_messages = []
-    
+
     is_thinking_on = ollama_payload.get("think") is True
 
     # Inject CoT prompt if thinking is enabled for a non-native model
     if is_thinking_on:
         has_system_prompt = False
         for message in messages:
+            content_str = message.get("content", "")
+            if isinstance(content_str, str):
+                # Sanitize prompt injection attempts that try to prematurely close the reasoning block
+                content_str = content_str.replace("</think>", "< /think>")
+
             if message.get("role") == "system":
-                message["content"] = f"{CHAIN_OF_THOUGHT_PROMPT}\n\n{message.get('content', '')}".strip()
+                message["content"] = f"{CHAIN_OF_THOUGHT_PROMPT}\n\n{content_str}".strip()
                 has_system_prompt = True
+            else:
+                message["content"] = content_str
+
             final_messages.append(message)
+
         if not has_system_prompt:
             final_messages.insert(0, {"role": "system", "content": CHAIN_OF_THOUGHT_PROMPT})
     else:
@@ -69,7 +96,7 @@ def translate_ollama_to_vllm_chat(ollama_payload: Dict[str, Any]) -> Dict[str, A
                     })
                 message["content"] = new_content
             del message["images"]
-            
+
     return vllm_payload
 
 def translate_ollama_to_vllm_embeddings(ollama_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -89,6 +116,7 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
     start_time = time.monotonic()
     total_eval_text = ""
     buffer = ""
+    usage_state = {"data": {}}
 
     def get_iso_timestamp(ts: int | None) -> str:
         """Converts a Unix timestamp to an ISO 8601 string, ensuring Z-suffix for UTC."""
@@ -110,14 +138,17 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
             if line.strip() == "data: [DONE]":
                 end_time = time.monotonic()
                 eval_duration_ns = (end_time - start_time) * 1_000_000_000
-                eval_count = len(total_eval_text) // 4
-                
-                final_done_chunk = { 
+
+                eval_count = usage_state["data"].get("completion_tokens", len(total_eval_text) // 4)
+                prompt_eval_count = usage_state["data"].get("prompt_tokens", 0)
+
+                final_done_chunk = {
                     "model": model_name,
                     "created_at": get_iso_timestamp(None),
                     "message": {"role": "assistant", "content": ""},
                     "done": True,
                     "eval_count": eval_count,
+                    "prompt_eval_count": prompt_eval_count,
                     "eval_duration": int(eval_duration_ns)
                 }
                 yield (json.dumps(final_done_chunk) + '\n').encode('utf-8')
@@ -127,13 +158,17 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                 continue
 
             try:
-                data_str = line.lstrip("data: ").strip()
+                data_str = line[6:].strip() if line.startswith("data: ") else line.strip()
                 if not data_str:
                     continue
-                
+
                 data = json.loads(data_str)
-                delta = data.get("choices", [{}])[0].get("delta", {})
-                finish_reason = data.get("choices", [{}])[0].get("finish_reason")
+
+                if "usage" in data and data["usage"]:
+                    usage_state["data"] = data["usage"]
+
+                delta = data.get("choices", [{}])[0].get("delta", {}) if data.get("choices") else {}
+                finish_reason = data.get("choices", [{}])[0].get("finish_reason") if data.get("choices") else None
                 created_ts = data.get("created")
 
                 # --- Handle Tool Call for "thinking" or actual tool ---
@@ -155,13 +190,13 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                         tool_call_part = t_call.get("function", {}).get("arguments", "")
                         if tool_call_part:
                             tool_call_buffer += tool_call_part
-                
+
                 # --- Process completed tool call ---
                 if in_tool_call and finish_reason == "tool_calls":
                     try:
                         # Determine if we were in a think block based on the tag logic
                         is_think_tool = "<think>" in total_eval_text or (not tool_call_buffer.startswith("{"))
-                        
+
                         args = tool_call_buffer
                         # Try parsing as JSON to format
                         try:
@@ -171,7 +206,7 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                                 args = "\n".join(parsed_args["steps"])
                             else:
                                 args = json.dumps(parsed_args, indent=2)
-                        except:
+                        except Exception:
                             pass
 
                         # If think block, we just emit the contents
@@ -195,7 +230,7 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
 
                     except Exception as e:
                         logger.error(f"Failed to parse tool call arguments: {tool_call_buffer}. Error: {e}")
-                    
+
                     tool_call_buffer = ""
                     in_tool_call = False
                     if "content" not in delta or not delta.get("content"):
@@ -213,20 +248,24 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
             except (json.JSONDecodeError, IndexError) as e:
                 logger.warning(f"Could not parse VLLM stream chunk: {line}. Error: {e}")
                 continue
-    
+
     # Process any final data left in the buffer. This is a safeguard.
     if buffer.strip():
         line = buffer.strip()
         if line.strip() == "data: [DONE]":
             end_time = time.monotonic()
             eval_duration_ns = (end_time - start_time) * 1_000_000_000
-            eval_count = len(total_eval_text) // 4
-            final_done_chunk = { 
+
+            eval_count = usage_state["data"].get("completion_tokens", len(total_eval_text) // 4)
+            prompt_eval_count = usage_state["data"].get("prompt_tokens", 0)
+
+            final_done_chunk = {
                 "model": model_name,
                 "created_at": get_iso_timestamp(None),
                 "message": {"role": "assistant", "content": ""},
                 "done": True,
                 "eval_count": eval_count,
+                "prompt_eval_count": prompt_eval_count,
                 "eval_duration": int(eval_duration_ns)
             }
             yield (json.dumps(final_done_chunk) + '\n').encode('utf-8')
@@ -236,3 +275,28 @@ def translate_vllm_to_ollama_embeddings(vllm_payload: Dict[str, Any]) -> Dict[st
     embedding_data = vllm_payload.get("data", [])
     embedding = embedding_data[0].get("embedding") if embedding_data else []
     return {"embedding": embedding}
+def translate_vllm_to_ollama_chat(vllm_payload: Dict[str, Any]) -> Dict[str, Any]:
+    choices = vllm_payload.get("choices", [])
+    message = choices[0].get("message", {"role": "assistant", "content": ""}) if choices else {"role": "assistant", "content": ""}
+    finish_reason = choices[0].get("finish_reason", "stop") if choices else "stop"
+
+    created_ts = vllm_payload.get("created")
+    if created_ts is None:
+        dt_obj = datetime.now(timezone.utc)
+    else:
+        dt_obj = datetime.fromtimestamp(created_ts, tz=timezone.utc)
+    created_at = dt_obj.isoformat().replace('+00:00', 'Z')
+
+    usage = vllm_payload.get("usage", {})
+
+    ollama_response = {
+        "model": vllm_payload.get("model", ""),
+        "created_at": created_at,
+        "message": message,
+        "done": True,
+        "done_reason": finish_reason,
+        "prompt_eval_count": usage.get("prompt_tokens", 0),
+        "eval_count": usage.get("completion_tokens", 0)
+    }
+
+    return ollama_response

@@ -11,6 +11,7 @@ import asyncio
 import json
 import re
 import socket
+import ipaddress
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -28,21 +29,48 @@ def _get_auth_headers(server: OllamaServer) -> Dict[str, str]:
 def _is_safe_url(url: str) -> bool:
     """
     Validates that the provided URL is well-formed and uses a supported scheme.
-    SSRF protection relies on the fact that only authenticated admins can add servers.
-    Localhost and private IPs are explicitly allowed for local infrastructure.
+    Actively blocks localhost, loopback IPs, and AWS metadata endpoints to prevent SSRF.
+    Private IPs are still allowed for local infrastructure.
     """
     try:
         parsed = urlparse(str(url))
         # Ensure only http/https schemes are used
         if parsed.scheme not in ('http', 'https'):
             return False
-            
+
         # Ensure there is a valid hostname/netloc
-        if not parsed.netloc:
+        hostname = parsed.hostname
+        if not hostname:
             return False
-            
+
+        # Block localhost specifically
+        if hostname.lower() in ('localhost', 'localhost.localdomain'):
+            return False
+
+        # Resolve hostname to check IPs
+        try:
+            # Note: This is a synchronous DNS resolution, but acceptable for admin operations
+            ip_str = socket.gethostbyname(hostname)
+            ip_obj = ipaddress.ip_address(ip_str)
+
+            # Block loopback, link-local, and specific metadata IPs
+            if ip_obj.is_loopback:
+                return False
+
+            # Specifically block AWS metadata endpoint
+            if str(ip_obj) == "169.254.169.254":
+                return False
+
+            # Block 0.0.0.0
+            if str(ip_obj) == "0.0.0.0":
+                return False
+
+        except socket.gaierror:
+            # If we can't resolve it, it might not be a valid host, but let it fail down the line
+            pass
+
         return True
-        
+
     except Exception as e:
         logger.warning(f"URL validation check failed for {url}: {e}")
         return False
@@ -77,19 +105,19 @@ async def create_server(db: AsyncSession, server: ServerCreate) -> OllamaServer:
     # Validate URL safety
     if not _is_safe_url(str(server.url)):
         raise ValueError(f"URL {server.url} is not allowed for security reasons. Internal IPs and localhost are blocked.")
-        
+
     # Validate name
     if not server.name or len(server.name) > 128:
         raise ValueError("Server name must be 1-128 characters")
-        
+
     # Validate server_type
     if server.server_type not in ('ollama', 'vllm'):
         raise ValueError("Server type must be 'ollama' or 'vllm'")
 
     encrypted_key = encrypt_data(server.api_key) if server.api_key else None
     db_server = OllamaServer(
-        name=server.name, 
-        url=str(server.url), 
+        name=server.name,
+        url=str(server.url),
         server_type=server.server_type,
         encrypted_api_key=encrypted_key
     )
@@ -105,14 +133,14 @@ async def update_server(db: AsyncSession, server_id: int, server_update: ServerU
         return None
 
     update_data = server_update.model_dump(exclude_unset=True)
-    
+
     if "api_key" in update_data:
         api_key = update_data.pop("api_key")
         # A non-None value in api_key means we are intentionally setting/updating/clearing it.
         # An empty string will clear it.
         if api_key is not None:
             db_server.encrypted_api_key = encrypt_data(api_key) if api_key else None
-        
+
     for key, value in update_data.items():
         if value is not None:
             # Validate URL on update
@@ -130,7 +158,7 @@ async def update_server(db: AsyncSession, server_id: int, server_update: ServerU
                 setattr(db_server, key, value)
             else:
                 setattr(db_server, key, value)
-            
+
     await db.commit()
     await db.refresh(db_server)
     return db_server
@@ -155,7 +183,7 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
     server = await get_server_by_id(db, server_id)
     if not server:
         return {"success": False, "error": "Server not found", "models": []}
-    
+
     # Security: Re-validate URL at fetch time
     if not _is_safe_url(server.url):
         error_msg = f"URL {server.url} is blocked for security reasons"
@@ -163,14 +191,14 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
         server.last_error = error_msg
         await db.commit()
         return {"success": False, "error": error_msg, "models": []}
-    
+
     headers = _get_auth_headers(server)
 
     try:
         models = []
         # Use timeout to prevent hanging
         timeout = httpx.Timeout(30.0, connect=10.0)
-        
+
         async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=False) as client:
             if server.server_type == "vllm":
                 endpoint_url = f"{server.url.rstrip('/')}/v1/models"
@@ -178,7 +206,7 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                 response.raise_for_status()
                 data = response.json()
                 models_data = data.get("data", [])
-                
+
                 # Validate model data structure to prevent injection
                 for model in models_data:
                     if not isinstance(model, dict):
@@ -188,7 +216,7 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                         continue
                     # Sanitize model_id
                     model_id = re.sub(r'[^\w\.\-:/]', '', model_id)[:256]
-                    
+
                     family = model_id.split(':')[0].split('-')[0] if ':' in model_id else model_id.split('-')[0]
                     family = re.sub(r'[^\w\.\-]', '', family)[:64]
 
@@ -214,7 +242,7 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                 response.raise_for_status()
                 data = response.json()
                 raw_models = data.get("models", [])
-                
+
                 # Validate and sanitize model data
                 for model in raw_models:
                     if not isinstance(model, dict):
@@ -224,29 +252,29 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                         continue
                     # Sanitize model name
                     name = re.sub(r'[^\w\.\-:@]', '', name)[:256]
-                    
+
                     # Sanitize other fields
                     size = model.get("size", 0)
                     try:
                         size = int(size)
                     except (ValueError, TypeError):
                         size = 0
-                        
+
                     modified_at = model.get("modified_at", "")
                     if not isinstance(modified_at, str):
                         modified_at = ""
                     modified_at = modified_at[:64]
-                    
+
                     digest = model.get("digest", "")
                     if not isinstance(digest, str):
                         digest = ""
                     digest = re.sub(r'[^\w:]', '', digest)[:128]
-                    
+
                     # Sanitize details
                     details = model.get("details", {})
                     if not isinstance(details, dict):
                         details = {}
-                    
+
                     safe_model = {
                         "name": name,
                         "size": size,
@@ -264,14 +292,14 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                     if details.get("families") and isinstance(details["families"], list):
                         safe_families = [str(f)[:64] for f in details["families"] if isinstance(f, str)]
                         safe_model["details"]["families"] = safe_families[:10]  # Limit array size
-                    
+
                     models.append(safe_model)
-        
+
         # Limit total models to prevent DoS via huge model list
         if len(models) > 10000:
             logger.warning(f"Truncating model list from {len(models)} to 10000 for server {server.name}")
             models = models[:10000]
-            
+
         server.available_models = models
         server.models_last_updated = datetime.datetime.utcnow()
         server.last_error = None
@@ -301,15 +329,15 @@ async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
     """Pulls a model on a specific Ollama server."""
     if server.server_type == 'vllm':
         return {"success": False, "message": "Pulling models is not supported for vLLM servers."}
-    
+
     # Validate model name
     if not model_name or len(model_name) > 256:
         return {"success": False, "message": "Invalid model name"}
-        
+
     # Sanitize model name
     if not re.match(r'^[\w\.\-:@]+$', model_name):
         return {"success": False, "message": "Model name contains invalid characters"}
-        
+
     headers = _get_auth_headers(server)
     pull_url = f"{server.url.rstrip('/')}/api/pull"
     payload = {"name": model_name, "stream": False}
@@ -321,11 +349,11 @@ async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
             if response.status_code >= 400:
                 error_text = await response.aread()
                 raise httpx.HTTPStatusError(
-                    f"Pull failed with status {response.status_code}", 
-                    request=response.request, 
+                    f"Pull failed with status {response.status_code}",
+                    request=response.request,
                     response=response
                 )
-                
+
             async for chunk in response.aiter_text():
                 try:
                     line = json.loads(chunk)
@@ -333,10 +361,10 @@ async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
                     logger.debug(f"Pull status for {model_name} on {server.name}: {line.get('status')}")
                 except json.JSONDecodeError:
                     continue # Ignore non-json chunks
-        
+
         logger.info(f"Successfully pulled/updated model '{model_name}' on server '{server.name}'")
         return {"success": True, "message": f"Model '{model_name}' pulled/updated successfully."}
-        
+
     except httpx.HTTPStatusError as e:
         error_msg = f"Failed to pull model '{model_name}': Server returned status {e.response.status_code}"[:512]
         logger.error(f"{error_msg} on server '{server.name}'")
@@ -355,7 +383,7 @@ async def delete_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
     # Validate model name
     if not model_name or len(model_name) > 256:
         return {"success": False, "message": "Invalid model name"}
-        
+
     # Sanitize model name
     if not re.match(r'^[\w\.\-:@]+$', model_name):
         return {"success": False, "message": "Model name contains invalid characters"}
@@ -392,7 +420,7 @@ async def load_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
     # Validate model name
     if not model_name or len(model_name) > 256:
         return {"success": False, "message": "Invalid model name"}
-        
+
     # Sanitize model name
     if not re.match(r'^[\w\.\-:@]+$', model_name):
         return {"success": False, "message": "Model name contains invalid characters"}
@@ -428,7 +456,7 @@ async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
     # Validate model name
     if not model_name or len(model_name) > 256:
         return {"success": False, "message": "Invalid model name"}
-        
+
     # Sanitize model name
     if not re.match(r'^[\w\.\-:@]+$', model_name):
         return {"success": False, "message": "Model name contains invalid characters"}
@@ -466,7 +494,7 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
     # Validate model name
     if not model_name or len(model_name) > 256:
         return []
-        
+
     # Sanitize model name for safety
     model_name = re.sub(r'[^\w\.\-:@]', '', model_name)[:256]
 
@@ -483,21 +511,21 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
                     models_list = json.loads(models_list)
                 except json.JSONDecodeError:
                     continue
-            
+
             if not isinstance(models_list, list):
                 continue
-                
+
             for model_data in models_list:
                 if isinstance(model_data, dict) and "name" in model_data:
                     available_model_name = model_data["name"]
                     if not isinstance(available_model_name, str):
                         continue
-                        
+
                     # Flexible matching:
                     # 1. Exact match (e.g., "llama3:8b" == "llama3:8b")
                     # 2. Prefix match (e.g., "llama3" matches "llama3:8b")
                     # 3. Substring match for vLLM (e.g., "Llama-2-7b" matches "models--meta-llama--Llama-2-7b-chat-hf")
-                    if (available_model_name == model_name or 
+                    if (available_model_name == model_name or
                         available_model_name.startswith(f"{model_name}:") or
                         (server.server_type == 'vllm' and model_name in available_model_name)):
                         servers_with_model.append(server)
@@ -520,7 +548,7 @@ async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[
     # Validate filter_type
     if filter_type not in (None, 'chat', 'embedding'):
         filter_type = None
-        
+
     servers = await get_servers(db)
     active_servers = [s for s in servers if s.is_active]
 
@@ -528,7 +556,7 @@ async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[
     for server in active_servers:
         if not server.available_models:
             continue
-        
+
         models_list = server.available_models
         if isinstance(models_list, str):
             try:
@@ -545,19 +573,19 @@ async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[
                 model_name = model["name"]
                 if not isinstance(model_name, str):
                     continue
-                    
+
                 # Sanitize
                 model_name = model_name[:256]
-                
+
                 is_embed = is_embedding_model(model_name)
-                
+
                 if filter_type == 'embedding' and is_embed:
                     all_models.add(model_name)
                 elif filter_type == 'chat' and not is_embed:
                     all_models.add(model_name)
                 elif filter_type is None:
                     all_models.add(model_name)
-    
+
     # Limit total
     result = sorted(list(all_models))
     if len(result) > 10000:
@@ -572,7 +600,7 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
     # Validate filter_type
     if filter_type not in (None, 'chat', 'embedding'):
         filter_type = None
-        
+
     servers = await get_servers(db)
     active_servers = [s for s in servers if s.is_active]
 
@@ -587,21 +615,21 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
                 except json.JSONDecodeError:
                     logger.warning(f"Could not parse available_models JSON for server {server.name} in get_all_models_grouped_by_server")
                     continue
-                    
+
             if not isinstance(models_list, list):
                 continue
-                
+
             for model in models_list:
                 if isinstance(model, dict) and "name" in model:
                     model_name = model["name"]
                     if not isinstance(model_name, str):
                         continue
-                        
+
                     # Sanitize
                     model_name = model_name[:256]
-                    
+
                     is_embed = is_embedding_model(model_name)
-                    
+
                     should_add = False
                     if filter_type == 'embedding' and is_embed:
                         should_add = True
@@ -609,14 +637,14 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
                         should_add = True
                     elif filter_type is None:
                         should_add = True
-                    
+
                     if should_add:
                         server_models.append(model_name)
-        
+
         # Limit per server
         if len(server_models) > 5000:
             server_models = server_models[:5000]
-            
+
         if server_models:
             # Sanitize server name for dict key
             safe_name = server.name[:128] if server.name else "Unknown"
@@ -626,10 +654,10 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
     final_grouped_models = {}
     if filter_type == 'chat' or filter_type is None:
         final_grouped_models["Proxy Features"] = ["auto"]
-    
+
     # Merge the server-specific models after the proxy features
     final_grouped_models.update(grouped_models)
-            
+
     return final_grouped_models
 
 
@@ -640,10 +668,10 @@ async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.Asy
     """
     servers = await get_servers(db)
     active_servers = [s for s in servers if s.is_active]
-    
+
     ollama_servers = [s for s in active_servers if s.server_type == 'ollama']
     vllm_servers = [s for s in active_servers if s.server_type == 'vllm']
-    
+
     all_models = []
 
     # 1. Fetch actively running models from Ollama servers
@@ -653,14 +681,14 @@ async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.Asy
                 # Security check
                 if not _is_safe_url(server.url):
                     logger.warning(f"Skipping server {server.name} due to unsafe URL")
-                    return []
-                    
+                    return []  # Return empty for this specific server task
+
                 headers = _get_auth_headers(server)
                 ps_url = f"{server.url.rstrip('/')}/api/ps"
                 response = await http_client.get(ps_url, timeout=10.0, headers=headers)
                 response.raise_for_status()
                 data = response.json()
-                
+
                 # Validate and sanitize response
                 result = []
                 for model in data.get("models", []):
@@ -696,11 +724,11 @@ async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.Asy
                         "size_vram": 1,  # Assume GPU placement for vLLM
                         "expires_at": "N/A (Always Active)",
                     })
-                    
+
     # Limit total
     if len(all_models) > 10000:
         all_models = all_models[:10000]
-        
+
     return all_models
 
 
@@ -743,21 +771,21 @@ async def check_server_health(http_client: httpx.AsyncClient, server: OllamaServ
     # Security check
     if not _is_safe_url(server.url):
         return {"server_id": server.id, "name": server.name[:128], "url": server.url[:256], "status": "Blocked", "reason": "URL blocked for security"}
-        
+
     headers = _get_auth_headers(server)
     try:
         ping_url = server.url.rstrip('/')
         # vLLM servers have a /health endpoint, Ollama root is enough
         if server.server_type == 'vllm':
             ping_url += '/health'
-            
+
         response = await http_client.get(ping_url, timeout=5.0, headers=headers)
-        
+
         if response.status_code == 200:
             return {"server_id": server.id, "name": server.name[:128], "url": server.url[:256], "status": "Online", "reason": None}
         else:
             return {"server_id": server.id, "name": server.name[:128], "url": server.url[:256], "status": "Offline", "reason": f"Status {response.status_code}"}
-    
+
     except httpx.RequestError as e:
         logger.warning(f"Health check failed for server '{server.name}': {str(e)[:256]}")
         return {"server_id": server.id, "name": server.name[:128], "url": server.url[:256], "status": "Offline", "reason": str(e)[:256]}

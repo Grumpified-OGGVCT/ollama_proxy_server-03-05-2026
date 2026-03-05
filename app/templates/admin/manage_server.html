@@ -33,8 +33,8 @@
     {% else %}
     <div class="card-style">
         <h2 class="card-header text-2xl font-bold mb-4 pb-2">Model Management</h2>
-        <div class="info-box p-4">
-            Model management (pulling, deleting, etc.) is not supported for vLLM servers through this UI. Models for vLLM servers are configured when the vLLM server is launched. You can refresh the model list from the main server management page.
+        <div role="alert" tabindex="0" class="info-box p-4 focus-visible:ring-2 focus-visible:ring-[var(--color-primary-500)] focus:outline-none bg-blue-50 border border-blue-200 text-blue-800 rounded-md shadow-sm">
+            Model management is delegated to the host instance for OpenAI-compatible (vLLM/OpenRouter) servers.
         </div>
     </div>
     {% endif %}
