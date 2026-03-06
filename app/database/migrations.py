@@ -5,8 +5,8 @@ Handles schema updates when upgrading from older versions.
 
 import logging
 import re
-from typing import Dict, Set, List
-from sqlalchemy import text, inspect
+from typing import Dict, Set
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.sql import quoted_name
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # --- SQL Injection Protection: Valid SQLite Identifier Pattern ---
 # SQLite identifiers must start with letter or underscore, followed by alphanumerics/underscores
 # Maximum length is typically limited by SQLite implementation
-VALID_IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+VALID_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 MAX_IDENTIFIER_LENGTH = 128  # Reasonable limit for safety
 
 
@@ -61,25 +61,18 @@ async def check_column_exists(engine: AsyncEngine, table_name: str, column_name:
     # Sanitize inputs to prevent SQL injection
     safe_table_name = sanitize_identifier(table_name)
     safe_column_name = sanitize_identifier(column_name)
-    
+
     async with engine.begin() as conn:
         # SQLite-specific query to check for column existence
         # Use quoted_name to ensure proper quoting of the identifier
         quoted_table = quoted_name(safe_table_name, quote=True)
-        result = await conn.execute(
-            text(f"PRAGMA table_info({quoted_table})")
-        )
+        result = await conn.execute(text(f"PRAGMA table_info({quoted_table})"))
         columns = result.fetchall()
         column_names = [col[1] for col in columns]  # Column name is at index 1
         return safe_column_name in column_names
 
 
-async def add_column_if_missing(
-    engine: AsyncEngine,
-    table_name: str,
-    column_name: str,
-    column_definition: str
-) -> bool:
+async def add_column_if_missing(engine: AsyncEngine, table_name: str, column_name: str, column_definition: str) -> bool:
     """
     Add a column to a table if it doesn't exist.
 
@@ -95,7 +88,7 @@ async def add_column_if_missing(
     # Sanitize all identifier inputs
     safe_table_name = sanitize_identifier(table_name)
     safe_column_name = sanitize_identifier(column_name)
-    
+
     # Validate column definition - only allow specific safe patterns
     # This prevents injection via the column definition itself
     safe_definition = validate_column_definition(column_definition)
@@ -108,9 +101,7 @@ async def add_column_if_missing(
             # Use quoted identifiers to prevent any remaining injection vectors
             quoted_table = quoted_name(safe_table_name, quote=True)
             quoted_column = quoted_name(safe_column_name, quote=True)
-            await conn.execute(
-                text(f"ALTER TABLE {quoted_table} ADD COLUMN {quoted_column} {safe_definition}")
-            )
+            await conn.execute(text(f"ALTER TABLE {quoted_table} ADD COLUMN {quoted_column} {safe_definition}"))
         logger.info(f"Successfully added column '{safe_column_name}' to table '{safe_table_name}'")
         return True
     else:
@@ -122,60 +113,51 @@ def validate_column_definition(definition: str) -> str:
     """
     Validate and sanitize a column definition string.
     Only allows specific safe SQLite type definitions.
-    
+
     Raises ValueError if the definition contains unsafe content.
     """
     if not isinstance(definition, str):
         raise ValueError("Column definition must be a string")
-    
+
     # Maximum length check
     if len(definition) > 256:
         raise ValueError("Column definition too long")
-    
+
     # Convert to uppercase for case-insensitive matching
     upper_def = definition.upper().strip()
-    
+
     # List of allowed safe patterns (SQLite types with optional constraints)
     # These are strict patterns that don't allow arbitrary SQL injection
     allowed_patterns = [
-        r'^JSON$',  # JSON type
-        r'^DATETIME$',  # DATETIME type
-        r'^VARCHAR(\s*\(\s*\d+\s*\))?$',  # VARCHAR or VARCHAR(n)
-        r'^VARCHAR\s+NOT\s+NULL$',  # VARCHAR NOT NULL
-        r'^INTEGER$',  # INTEGER
-        r'^INTEGER\s+NOT\s+NULL$',  # INTEGER NOT NULL
-        r'^INTEGER\s+NOT\s+NULL\s+PRIMARY\s+KEY$',  # INTEGER NOT NULL PRIMARY KEY
-        r'^INTEGER\s+NOT\s+NULL\s+DEFAULT\s+\d+$',  # INTEGER NOT NULL DEFAULT n
-        r'^BOOLEAN$',  # BOOLEAN (stored as INTEGER in SQLite)
-        r'^BOOLEAN\s+NOT\s+NULL$',  # BOOLEAN NOT NULL
-        r'^BOOLEAN\s+NOT\s+NULL\s+DEFAULT\s+(0|1)$',  # BOOLEAN NOT NULL DEFAULT 0/1
-        r'^BOOLEAN\s+DEFAULT\s+(0|1|TRUE|FALSE)\s+NOT\s+NULL$',  # BOOLEAN with constraints
-        r'^BOOLEAN\s+DEFAULT\s+\d+\s+NOT\s+NULL$',  # Alternative boolean format
+        r"^JSON$",  # JSON type
+        r"^DATETIME$",  # DATETIME type
+        r"^VARCHAR(\s*\(\s*\d+\s*\))?$",  # VARCHAR or VARCHAR(n)
+        r"^VARCHAR\s+NOT\s+NULL$",  # VARCHAR NOT NULL
+        r"^INTEGER$",  # INTEGER
+        r"^INTEGER\s+NOT\s+NULL$",  # INTEGER NOT NULL
+        r"^INTEGER\s+NOT\s+NULL\s+PRIMARY\s+KEY$",  # INTEGER NOT NULL PRIMARY KEY
+        r"^INTEGER\s+NOT\s+NULL\s+DEFAULT\s+\d+$",  # INTEGER NOT NULL DEFAULT n
+        r"^BOOLEAN$",  # BOOLEAN (stored as INTEGER in SQLite)
+        r"^BOOLEAN\s+NOT\s+NULL$",  # BOOLEAN NOT NULL
+        r"^BOOLEAN\s+NOT\s+NULL\s+DEFAULT\s+(0|1)$",  # BOOLEAN NOT NULL DEFAULT 0/1
+        r"^BOOLEAN\s+DEFAULT\s+(0|1|TRUE|FALSE)\s+NOT\s+NULL$",  # BOOLEAN with constraints
+        r"^BOOLEAN\s+DEFAULT\s+\d+\s+NOT\s+NULL$",  # Alternative boolean format
     ]
-    
+
     for pattern in allowed_patterns:
         if re.match(pattern, upper_def, re.IGNORECASE):
             # Return the original (preserve case for any string literals)
             return definition.strip()
-    
+
     # Special case: check for simple type with DEFAULT and NOT NULL
     # Only allow specific safe default values
-    safe_default_pattern = re.compile(
-        r'^(INTEGER|VARCHAR|TEXT|BOOLEAN)\s+'
-        r'DEFAULT\s+'
-        r'(\d+|\'[^\']*\'|NULL)\s*'
-        r'(NOT\s+NULL)?$',
-        re.IGNORECASE
-    )
-    
+    safe_default_pattern = re.compile(r"^(INTEGER|VARCHAR|TEXT|BOOLEAN)\s+" r"DEFAULT\s+" r"(\d+|\'[^\']*\'|NULL)\s*" r"(NOT\s+NULL)?$", re.IGNORECASE)
+
     if safe_default_pattern.match(definition.strip()):
         return definition.strip()
-    
+
     # If no pattern matches, reject as potentially unsafe
-    raise ValueError(
-        f"Unsafe column definition rejected: '{definition}'. "
-        f"Only standard SQLite types with safe constraints are allowed."
-    )
+    raise ValueError(f"Unsafe column definition rejected: '{definition}'. " f"Only standard SQLite types with safe constraints are allowed.")
 
 
 async def migrate_ollama_servers_table(engine: AsyncEngine) -> None:
@@ -187,10 +169,7 @@ async def migrate_ollama_servers_table(engine: AsyncEngine) -> None:
 
     # Check if table exists first
     async with engine.begin() as conn:
-        result = await conn.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' AND name=:name"),
-            {"name": "ollama_servers"}
-        )
+        result = await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:name"), {"name": "ollama_servers"})
         table_exists = result.fetchone() is not None
 
     if not table_exists:
@@ -198,20 +177,10 @@ async def migrate_ollama_servers_table(engine: AsyncEngine) -> None:
         return
 
     # Add available_models column if missing
-    await add_column_if_missing(
-        engine,
-        "ollama_servers",
-        "available_models",
-        "JSON"
-    )
+    await add_column_if_missing(engine, "ollama_servers", "available_models", "JSON")
 
     # Add models_last_updated column if missing
-    await add_column_if_missing(
-        engine,
-        "ollama_servers",
-        "models_last_updated",
-        "DATETIME"
-    )
+    await add_column_if_missing(engine, "ollama_servers", "models_last_updated", "DATETIME")
 
     logger.info("ollama_servers table migration complete")
 
@@ -225,10 +194,7 @@ async def migrate_api_keys_table(engine: AsyncEngine) -> None:
 
     # Check if table exists first
     async with engine.begin() as conn:
-        result = await conn.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' AND name=:name"),
-            {"name": "api_keys"}
-        )
+        result = await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:name"), {"name": "api_keys"})
         table_exists = result.fetchone() is not None
 
     if not table_exists:
@@ -236,36 +202,16 @@ async def migrate_api_keys_table(engine: AsyncEngine) -> None:
         return
 
     # Add is_active column if missing
-    await add_column_if_missing(
-        engine,
-        "api_keys",
-        "is_active",
-        "BOOLEAN DEFAULT 1 NOT NULL"
-    )
+    await add_column_if_missing(engine, "api_keys", "is_active", "BOOLEAN DEFAULT 1 NOT NULL")
 
     # Add is_revoked column if missing
-    await add_column_if_missing(
-        engine,
-        "api_keys",
-        "is_revoked",
-        "BOOLEAN DEFAULT 0 NOT NULL"
-    )
+    await add_column_if_missing(engine, "api_keys", "is_revoked", "BOOLEAN DEFAULT 0 NOT NULL")
 
     # Add rate_limit_requests column if missing
-    await add_column_if_missing(
-        engine,
-        "api_keys",
-        "rate_limit_requests",
-        "INTEGER"
-    )
+    await add_column_if_missing(engine, "api_keys", "rate_limit_requests", "INTEGER")
 
     # Add rate_limit_window_minutes column if missing
-    await add_column_if_missing(
-        engine,
-        "api_keys",
-        "rate_limit_window_minutes",
-        "INTEGER"
-    )
+    await add_column_if_missing(engine, "api_keys", "rate_limit_window_minutes", "INTEGER")
 
     logger.info("api_keys table migration complete")
 
@@ -279,10 +225,7 @@ async def migrate_usage_logs_table(engine: AsyncEngine) -> None:
 
     # Check if table exists first
     async with engine.begin() as conn:
-        result = await conn.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' AND name=:name"),
-            {"name": "usage_logs"}
-        )
+        result = await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:name"), {"name": "usage_logs"})
         table_exists = result.fetchone() is not None
 
     if not table_exists:
@@ -290,40 +233,18 @@ async def migrate_usage_logs_table(engine: AsyncEngine) -> None:
         return
 
     # Add model column if missing
-    await add_column_if_missing(
-        engine,
-        "usage_logs",
-        "model",
-        "VARCHAR"
-    )
+    await add_column_if_missing(engine, "usage_logs", "model", "VARCHAR")
 
     # Add token usage columns if missing
-    await add_column_if_missing(
-        engine,
-        "usage_logs",
-        "prompt_tokens",
-        "INTEGER"
-    )
-    await add_column_if_missing(
-        engine,
-        "usage_logs",
-        "completion_tokens",
-        "INTEGER"
-    )
-    await add_column_if_missing(
-        engine,
-        "usage_logs",
-        "total_tokens",
-        "INTEGER"
-    )
+    await add_column_if_missing(engine, "usage_logs", "prompt_tokens", "INTEGER")
+    await add_column_if_missing(engine, "usage_logs", "completion_tokens", "INTEGER")
+    await add_column_if_missing(engine, "usage_logs", "total_tokens", "INTEGER")
 
     # Create index on model column if it doesn't exist
     # Note: SQLite will silently ignore if index already exists
     async with engine.begin() as conn:
         try:
-            await conn.execute(
-                text("CREATE INDEX IF NOT EXISTS ix_usage_logs_model ON usage_logs (model)")
-            )
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_usage_logs_model ON usage_logs (model)"))
             logger.info("Ensured index ix_usage_logs_model exists")
         except Exception as e:
             logger.debug(f"Index creation note: {e}")
@@ -340,10 +261,7 @@ async def migrate_app_settings_data(engine: AsyncEngine) -> None:
 
     # Check if table exists first
     async with engine.begin() as conn:
-        result = await conn.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' AND name=:name"),
-            {"name": "app_settings"}
-        )
+        result = await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:name"), {"name": "app_settings"})
         table_exists = result.fetchone() is not None
 
     if not table_exists:
@@ -352,9 +270,7 @@ async def migrate_app_settings_data(engine: AsyncEngine) -> None:
 
     # Fetch current settings
     async with engine.begin() as conn:
-        result = await conn.execute(
-            text("SELECT id, settings_data FROM app_settings WHERE id = 1")
-        )
+        result = await conn.execute(text("SELECT id, settings_data FROM app_settings WHERE id = 1"))
         row = result.fetchone()
 
         if not row:
@@ -363,14 +279,11 @@ async def migrate_app_settings_data(engine: AsyncEngine) -> None:
 
         settings_id, settings_json = row
         import json
+
         settings_data = json.loads(settings_json) if settings_json else {}
 
         # Default values for new retry settings
-        default_retry_settings = {
-            "max_retries": 2,
-            "retry_total_timeout_seconds": 1.0,
-            "retry_base_delay_ms": 10
-        }
+        default_retry_settings = {"max_retries": 5, "retry_total_timeout_seconds": 2.0, "retry_base_delay_ms": 50}
 
         # Add missing fields
         updated = False
@@ -383,10 +296,7 @@ async def migrate_app_settings_data(engine: AsyncEngine) -> None:
         # Update the database if any fields were added
         if updated:
             updated_json = json.dumps(settings_data)
-            await conn.execute(
-                text("UPDATE app_settings SET settings_data = :settings WHERE id = :id"),
-                {"settings": updated_json, "id": settings_id}
-            )
+            await conn.execute(text("UPDATE app_settings SET settings_data = :settings WHERE id = :id"), {"settings": updated_json, "id": settings_id})
             logger.info("Updated app_settings with new retry configuration fields")
         else:
             logger.debug("app_settings already has all required fields")
@@ -407,21 +317,15 @@ async def get_table_columns(engine: AsyncEngine, table_name: str) -> Set[str]:
     """
     # Sanitize table name
     safe_table_name = sanitize_identifier(table_name)
-    
+
     async with engine.begin() as conn:
         quoted_table = quoted_name(safe_table_name, quote=True)
-        result = await conn.execute(
-            text(f"PRAGMA table_info({quoted_table})")
-        )
+        result = await conn.execute(text(f"PRAGMA table_info({quoted_table})"))
         columns = result.fetchall()
         return {col[1] for col in columns}  # Column name is at index 1
 
 
-async def auto_migrate_table(
-    engine: AsyncEngine,
-    table_name: str,
-    expected_columns: Dict[str, str]
-) -> None:
+async def auto_migrate_table(engine: AsyncEngine, table_name: str, expected_columns: Dict[str, str]) -> None:
     """
     Automatically add missing columns to a table based on expected schema.
 
@@ -433,13 +337,10 @@ async def auto_migrate_table(
     """
     # Sanitize table name
     safe_table_name = sanitize_identifier(table_name)
-    
+
     # Check if table exists
     async with engine.begin() as conn:
-        result = await conn.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' AND name=:name"),
-            {"name": safe_table_name}
-        )
+        result = await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:name"), {"name": safe_table_name})
         table_exists = result.fetchone() is not None
 
     if not table_exists:
@@ -486,13 +387,11 @@ async def check_and_report_schema(engine: AsyncEngine) -> None:
 
     async with engine.begin() as conn:
         # Get all tables
-        result = await conn.execute(
-            text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-        )
+        result = await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"))
         tables = [row[0] for row in result.fetchall()]
 
         for table_name in tables:
-            if table_name.startswith('sqlite_'):
+            if table_name.startswith("sqlite_"):
                 continue
 
             # Sanitize for display (but we know it's from sqlite_master so it's safe)
@@ -501,9 +400,7 @@ async def check_and_report_schema(engine: AsyncEngine) -> None:
 
             # Get columns for this table
             quoted_table = quoted_name(table_name, quote=True)
-            result = await conn.execute(
-                text(f"PRAGMA table_info({quoted_table})")
-            )
+            result = await conn.execute(text(f"PRAGMA table_info({quoted_table})"))
             columns = result.fetchall()
 
             for col in columns:
@@ -511,9 +408,7 @@ async def check_and_report_schema(engine: AsyncEngine) -> None:
                 pk_marker = " [PK]" if pk else ""
                 null_marker = " NOT NULL" if not_null else ""
                 default_marker = f" DEFAULT {default_val}" if default_val else ""
-                logger.info(
-                    f"  - {col_name}: {col_type}{pk_marker}{null_marker}{default_marker}"
-                )
+                logger.info(f"  - {col_name}: {col_type}{pk_marker}{null_marker}{default_marker}")
 
     logger.info("=" * 60)
 
@@ -612,14 +507,12 @@ async def create_missing_indexes(engine: AsyncEngine) -> None:
                 safe_index = sanitize_identifier(index_name)
                 safe_table = sanitize_identifier(table_name)
                 safe_column = sanitize_identifier(column_name)
-                
+
                 quoted_index = quoted_name(safe_index, quote=True)
                 quoted_table = quoted_name(safe_table, quote=True)
                 quoted_column = quoted_name(safe_column, quote=True)
-                
-                await conn.execute(
-                    text(f"CREATE INDEX IF NOT EXISTS {quoted_index} ON {quoted_table} ({quoted_column})")
-                )
+
+                await conn.execute(text(f"CREATE INDEX IF NOT EXISTS {quoted_index} ON {quoted_table} ({quoted_column})"))
                 logger.debug(f"Ensured index {safe_index} exists on {safe_table}.{safe_column}")
             except ValueError as e:
                 logger.warning(f"Invalid identifier in index definition: {e}")

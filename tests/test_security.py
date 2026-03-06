@@ -1,11 +1,9 @@
 # tests/test_security.py
 import pytest
-import hmac
-import time
 import asyncio
-from pathlib import Path
 from app.utils.auth import AuthManager
 from app.middleware.security import RateLimiter
+
 
 def test_auth_manager_constant_time(tmp_path):
     users_file = tmp_path / "authorized_users.txt"
@@ -22,6 +20,7 @@ def test_auth_manager_constant_time(tmp_path):
     # Empty string/None tests
     assert auth.validate_token("") is None
     assert auth.validate_token(None) is None
+
 
 @pytest.mark.asyncio
 async def test_rate_limiter_sliding_window():

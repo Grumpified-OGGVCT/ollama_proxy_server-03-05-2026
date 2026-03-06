@@ -10,14 +10,13 @@ import secrets
 from pathlib import Path
 import os
 import re
-from pydantic import AnyHttpUrl, ValidationError
+from pydantic import ValidationError
 
 from fastapi import APIRouter, Depends, Request, Form, HTTPException, status, Query, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.security import verify_password
@@ -29,7 +28,6 @@ from app.schema.server import ServerCreate, ServerUpdate
 from app.schema.settings import AppSettingsModel
 from app.api.v1.dependencies import get_csrf_token, validate_csrf_token, login_rate_limiter
 
-
 logger = logging.getLogger(__name__)
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -38,7 +36,7 @@ templates = Jinja2Templates(directory="app/templates")
 MAX_LOGO_SIZE_MB = 2
 MAX_LOGO_SIZE_BYTES = MAX_LOGO_SIZE_MB * 1024 * 1024
 ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/gif", "image/svg+xml", "image/webp"]
-ALLOWED_LOGO_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp'}
+ALLOWED_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 UPLOADS_DIR = Path("app/static/uploads")
 SSL_DIR = Path(".ssl")
 
@@ -51,28 +49,28 @@ def sanitize_filename(filename: str) -> str:
     """
     if not filename:
         return ""
-    
+
     # Remove path traversal attempts
     filename = os.path.basename(filename)
-    
+
     # Remove null bytes
-    filename = filename.replace('\x00', '')
-    
+    filename = filename.replace("\x00", "")
+
     # Allow only alphanumeric, dots, dashes, and underscores
-    filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
-    
+    filename = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
+
     # Prevent double dots (path traversal)
-    while '..' in filename:
-        filename = filename.replace('..', '_')
-    
+    while ".." in filename:
+        filename = filename.replace("..", "_")
+
     # Ensure it doesn't start with dot (hidden files)
-    filename = filename.lstrip('.')
-    
+    filename = filename.lstrip(".")
+
     # Limit length
     if len(filename) > 255:
         name, ext = os.path.splitext(filename)
-        filename = name[:255 - len(ext)] + ext
-    
+        filename = name[: 255 - len(ext)] + ext
+
     return filename
 
 
@@ -87,7 +85,7 @@ def validate_file_extension(filename: str, allowed_extensions: set) -> bool:
 def validate_content_type(content_type: str, allowed_types: list) -> bool:
     """Validate content type is in allowed list."""
     # Normalize content type (remove charset, etc.)
-    main_type = content_type.split(';')[0].strip().lower()
+    main_type = content_type.split(";")[0].strip().lower()
     return main_type in allowed_types
 
 
@@ -97,14 +95,14 @@ def is_path_within_directory(target_path: Path, allowed_dir: Path) -> bool:
     SECURITY FIX: Properly validate that a path is within an allowed directory.
     This prevents path traversal attacks by resolving both paths and checking
     that the target is a subpath of the allowed directory.
-    
+
     Returns True only if target_path is within allowed_dir.
     """
     try:
         # Resolve both paths to absolute, normalized paths
         resolved_allowed = allowed_dir.resolve()
         resolved_target = target_path.resolve()
-        
+
         # Check if resolved_target is the same as or a subpath of resolved_allowed
         # This handles all path traversal attempts including symlinks, .., etc.
         return str(resolved_target).startswith(str(resolved_allowed) + os.sep) or resolved_target == resolved_allowed
@@ -118,14 +116,14 @@ def get_system_info():
     """Returns a dictionary with system usage information."""
     psutil.cpu_percent(interval=None)
     cpu_percent = psutil.cpu_percent(interval=0.1)
-    
+
     memory = psutil.virtual_memory()
     try:
-        disk = shutil.disk_usage('/')
+        disk = shutil.disk_usage("/")
     except FileNotFoundError:
         # Fallback for Windows
-        disk = shutil.disk_usage('C:\\')
-        
+        disk = shutil.disk_usage("C:\\")
+
     return {
         "cpu": {"percent": cpu_percent},
         "memory": {
@@ -140,15 +138,12 @@ def get_system_info():
         },
     }
 
+
 # --- Helper for Redis Rate Limit Scan ---
-async def get_active_rate_limits(
-    redis_client: redis.Redis, 
-    db: AsyncSession, 
-    settings: AppSettingsModel
-) -> List[Dict[str, Any]]:
+async def get_active_rate_limits(redis_client: redis.Redis, db: AsyncSession, settings: AppSettingsModel) -> List[Dict[str, Any]]:
     if not redis_client:
         return []
-        
+
     limits = []
     # Use SCAN to avoid blocking the server.
     async for key in redis_client.scan_iter("rate_limit:*"):
@@ -158,12 +153,12 @@ async def get_active_rate_limits(
             pipe.ttl(key)
             results = await pipe.execute()
             count, ttl = results
-            
+
             prefix = key.split(":", 1)[1]
 
             # Fetch API key details from DB to get the specific rate limit
             api_key = await apikey_crud.get_api_key_by_prefix(db, prefix=prefix)
-            
+
             key_limit = settings.rate_limit_requests
             key_window = settings.rate_limit_window_minutes
 
@@ -174,31 +169,23 @@ async def get_active_rate_limits(
                     key_window = api_key.rate_limit_window_minutes
 
             if count is not None and ttl is not None:
-                limits.append({
-                    "prefix": prefix,
-                    "count": int(count),
-                    "ttl_seconds": int(ttl),
-                    "limit": key_limit,
-                    "window_minutes": key_window
-                })
+                limits.append({"prefix": prefix, "count": int(count), "ttl_seconds": int(ttl), "limit": key_limit, "window_minutes": key_window})
         except Exception as e:
             logger.warning(f"Could not parse rate limit key {key}: {e}")
-            
+
     # Sort by the percentage of the limit used
     def sort_key(item):
-        if item['limit'] > 0:
-            return item['count'] / item['limit']
+        if item["limit"] > 0:
+            return item["count"] / item["limit"]
         return 0
-        
+
     return sorted(limits, key=sort_key, reverse=True)[:10]
+
 
 # --- Helper to add common context to all templates ---
 def get_template_context(request: Request) -> dict:
-    return {
-        "request": request,
-        "is_redis_connected": request.app.state.redis is not None,
-        "bootstrap_settings": settings
-    }
+    return {"request": request, "is_redis_connected": request.app.state.redis is not None, "bootstrap_settings": settings}
+
 
 def flash(request: Request, message: str, category: str = "info"):
     """
@@ -208,42 +195,53 @@ def flash(request: Request, message: str, category: str = "info"):
     messages.append({"message": message, "category": category})
     request.session["_messages"] = messages
 
-def get_flashed_messages(request: Request): return request.session.pop("_messages", [])
+
+def get_flashed_messages(request: Request):
+    return request.session.pop("_messages", [])
+
+
 templates.env.globals["get_flashed_messages"] = get_flashed_messages
+
+
 async def get_current_user_from_cookie(request: Request, db: AsyncSession = Depends(get_db)) -> User | None:
     user_id = request.session.get("user_id")
-    if user_id: 
+    if user_id:
         # Validate user_id is integer
         try:
             user_id = int(user_id)
         except (ValueError, TypeError):
             return None
-            
+
         user = await user_crud.get_user_by_id(db, user_id=user_id)
         if user:
-            db.expunge(user) # Detach the user object from the session to prevent lazy loading errors in templates.
+            db.expunge(user)  # Detach the user object from the session to prevent lazy loading errors in templates.
         return user
     return None
+
+
 async def require_admin_user(request: Request, current_user: Union[User, None] = Depends(get_current_user_from_cookie)) -> User:
-    if not current_user or not current_user.is_admin: raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, detail="Not authorized", headers={"Location": str(request.url_for("admin_login"))})
+    if not current_user or not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, detail="Not authorized", headers={"Location": str(request.url_for("admin_login"))})
     request.state.user = current_user
     return current_user
-    
+
+
 @router.get("/login", response_class=HTMLResponse, name="admin_login")
 async def admin_login_form(request: Request):
     context = get_template_context(request)
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/login.html", context)
 
+
 @router.post("/login", name="admin_login_post", dependencies=[Depends(login_rate_limiter), Depends(validate_csrf_token)])
 async def admin_login_post(request: Request, db: AsyncSession = Depends(get_db), username: str = Form(...), password: str = Form(...)):
     # Validate username format
-    if not username or len(username) > 128 or not re.match(r'^[\w.-]+$', username):
+    if not username or len(username) > 128 or not re.match(r"^[\w.-]+$", username):
         flash(request, "Invalid username format", "error")
         return RedirectResponse(url=request.url_for("admin_login"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     user = await user_crud.get_user_by_username(db, username=username)
-    
+
     is_valid = user and user.is_admin and verify_password(password, user.hashed_password)
     redis_client: redis.Redis = request.app.state.redis
     client_ip = request.client.host
@@ -253,7 +251,7 @@ async def admin_login_post(request: Request, db: AsyncSession = Depends(get_db),
         try:
             current_fails = await redis_client.incr(key)
             if current_fails == 1:
-                await redis_client.expire(key, 300) 
+                await redis_client.expire(key, 300)
         except Exception as e:
             logger.error(f"Redis failed during login attempt tracking: {e}")
 
@@ -270,71 +268,54 @@ async def admin_login_post(request: Request, db: AsyncSession = Depends(get_db),
     for key, value in old_session_data.items():
         if key != "_messages":  # Don't copy flash messages to new session
             request.session[key] = value
-    
+
     request.session["user_id"] = user.id
     flash(request, "Successfully logged in.", "success")
     return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
-    
+
+
 @router.get("/logout", name="admin_logout")
 async def admin_logout(request: Request):
     request.session.clear()
     return RedirectResponse(url=request.url_for("admin_login"), status_code=status.HTTP_303_SEE_OTHER)
-    
+
+
 @router.get("/dashboard", response_class=HTMLResponse, name="admin_dashboard")
 async def admin_dashboard(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     context = get_template_context(request)
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/dashboard.html", context)
 
+
 # --- API ENDPOINT FOR DYNAMIC DASHBOARD DATA ---
 @router.get("/system-info", response_class=JSONResponse, name="admin_system_info")
-async def get_system_and_ollama_info(
-    request: Request, 
-    db: AsyncSession = Depends(get_db), 
-    admin_user: User = Depends(require_admin_user)
-):
+async def get_system_and_ollama_info(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     http_client: httpx.AsyncClient = request.app.state.http_client
     redis_client: redis.Redis = request.app.state.redis
     app_settings: AppSettingsModel = request.app.state.settings
 
     # Run blocking psutil calls in a threadpool to avoid blocking the event loop
     system_info_task = run_in_threadpool(get_system_info)
-    
+
     # Fetch active models, server health, and server load concurrently
     running_models_task = server_crud.get_active_models_all_servers(db, http_client)
     server_health_task = server_crud.check_all_servers_health(db, http_client)
     server_load_task = log_crud.get_server_load_stats(db)
-    
+
     # Fetch rate limit info from Redis if available
     rate_limit_task = get_active_rate_limits(redis_client, db, app_settings)
-    
+
     # Await all tasks
-    (
-        system_info, 
-        running_models, 
-        server_health, 
-        server_load, 
-        rate_limits
-    ) = await asyncio.gather(
-        system_info_task,
-        running_models_task,
-        server_health_task,
-        server_load_task,
-        rate_limit_task
+    system_info, running_models, server_health, server_load, rate_limits = await asyncio.gather(
+        system_info_task, running_models_task, server_health_task, server_load_task, rate_limit_task
     )
-    
+
     # Combine server health and load data into a single structure
     server_load_map = {row.server_name: row.request_count for row in server_load}
     for server in server_health:
         server["request_count"] = server_load_map.get(server["name"], 0)
-        
-    return {
-        "system_info": system_info, 
-        "running_models": running_models,
-        "load_balancer_status": server_health,
-        "queue_status": rate_limits
-    }
-    
+
+    return {"system_info": system_info, "running_models": running_models, "load_balancer_status": server_health, "queue_status": rate_limits}
 
 
 @router.get("/stats", response_class=HTMLResponse, name="admin_stats")
@@ -351,54 +332,52 @@ async def admin_stats(
         sort_by = "request_count"
     if sort_order not in ["asc", "desc"]:
         sort_order = "desc"
-        
+
     context = get_template_context(request)
     key_usage_stats = await log_crud.get_usage_statistics(db, sort_by=sort_by, sort_order=sort_order)
     daily_stats = await log_crud.get_daily_usage_stats(db, days=30)
     hourly_stats = await log_crud.get_hourly_usage_stats(db)
     server_stats = await log_crud.get_server_load_stats(db)
     model_stats = await log_crud.get_model_usage_stats(db)
-    
+
     # Calculate token totals for summary
-    total_prompt_tokens = sum(row.total_prompt_tokens for row in key_usage_stats if hasattr(row, 'total_prompt_tokens'))
-    total_completion_tokens = sum(row.total_completion_tokens for row in key_usage_stats if hasattr(row, 'total_completion_tokens'))
-    total_tokens = sum(row.total_tokens for row in key_usage_stats if hasattr(row, 'total_tokens'))
-    
+    total_prompt_tokens = sum(row.total_prompt_tokens for row in key_usage_stats if hasattr(row, "total_prompt_tokens"))
+    total_completion_tokens = sum(row.total_completion_tokens for row in key_usage_stats if hasattr(row, "total_completion_tokens"))
+    total_tokens = sum(row.total_tokens for row in key_usage_stats if hasattr(row, "total_tokens"))
+
     # Prepare token data by model
     model_prompt_tokens = [row.total_prompt_tokens for row in model_stats]
     model_completion_tokens = [row.total_completion_tokens for row in model_stats]
     model_total_tokens = [row.total_tokens for row in model_stats]
-    
-    context.update({
-        "key_usage_stats": key_usage_stats,
-        "daily_labels": [
-            row.date if isinstance(row.date, str) 
-            else row.date.strftime('%Y-%m-%d') if hasattr(row.date, 'strftime')
-            else str(row.date)
-            for row in daily_stats
-        ],
-        "daily_data": [row.request_count for row in daily_stats],
-        "hourly_labels": [row['hour'] for row in hourly_stats],
-        "hourly_data": [row['request_count'] for row in hourly_stats],
-        "server_labels": [row.server_name for row in server_stats],
-        "server_data": [row.request_count for row in server_stats],
-        "model_labels": [row.model_name for row in model_stats],
-        "model_data": [row.request_count for row in model_stats],
-        "model_prompt_tokens": model_prompt_tokens,
-        "model_completion_tokens": model_completion_tokens,
-        "model_total_tokens": model_total_tokens,
-        "total_prompt_tokens": total_prompt_tokens,
-        "total_completion_tokens": total_completion_tokens,
-        "total_tokens": total_tokens,
-        "sort_by": sort_by,
-        "sort_order": sort_order,
-    })
+
+    context.update(
+        {
+            "key_usage_stats": key_usage_stats,
+            "daily_labels": [row.date if isinstance(row.date, str) else row.date.strftime("%Y-%m-%d") if hasattr(row.date, "strftime") else str(row.date) for row in daily_stats],
+            "daily_data": [row.request_count for row in daily_stats],
+            "hourly_labels": [row["hour"] for row in hourly_stats],
+            "hourly_data": [row["request_count"] for row in hourly_stats],
+            "server_labels": [row.server_name for row in server_stats],
+            "server_data": [row.request_count for row in server_stats],
+            "model_labels": [row.model_name for row in model_stats],
+            "model_data": [row.request_count for row in model_stats],
+            "model_prompt_tokens": model_prompt_tokens,
+            "model_completion_tokens": model_completion_tokens,
+            "model_total_tokens": model_total_tokens,
+            "total_prompt_tokens": total_prompt_tokens,
+            "total_completion_tokens": total_completion_tokens,
+            "total_tokens": total_tokens,
+            "sort_by": sort_by,
+            "sort_order": sort_order,
+        }
+    )
     return templates.TemplateResponse("admin/statistics.html", context)
 
 
 @router.get("/help", response_class=HTMLResponse, name="admin_help")
-async def admin_help_page(request: Request, admin_user: User = Depends(require_admin_user)): 
+async def admin_help_page(request: Request, admin_user: User = Depends(require_admin_user)):
     return templates.TemplateResponse("admin/help.html", get_template_context(request))
+
 
 @router.get("/servers", response_class=HTMLResponse, name="admin_servers")
 async def admin_server_management(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
@@ -407,36 +386,38 @@ async def admin_server_management(request: Request, db: AsyncSession = Depends(g
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/servers.html", context)
 
+
 @router.post("/servers/add", name="admin_add_server", dependencies=[Depends(validate_csrf_token)])
 async def admin_add_server(
-    request: Request, 
-    db: AsyncSession = Depends(get_db), 
-    admin_user: User = Depends(require_admin_user), 
-    server_name: str = Form(...), 
-    server_url: str = Form(...), 
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin_user: User = Depends(require_admin_user),
+    server_name: str = Form(...),
+    server_url: str = Form(...),
     server_type: str = Form(...),
-    api_key: Optional[str] = Form(None)
+    api_key: Optional[str] = Form(None),
 ):
     # Validate server name
     if not server_name or len(server_name) > 128:
         flash(request, "Server name is required and must be under 128 characters", "error")
         return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     # Validate server URL format and security
     if not server_url:
         flash(request, "Server URL is required", "error")
         return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
-    
+
     # Validate Server URL format
     try:
         from urllib.parse import urlparse
+
         parsed = urlparse(server_url)
-        
+
         # Ensure only HTTP/HTTPS protocols
-        if parsed.scheme not in ('http', 'https'):
+        if parsed.scheme not in ("http", "https"):
             flash(request, "Only HTTP and HTTPS URLs are allowed", "error")
             return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
-            
+
         # Ensure netloc is present (e.g., localhost:11434 or 192.168.1.1)
         if not parsed.netloc:
             flash(request, "Invalid server URL: missing hostname or IP", "error")
@@ -446,12 +427,12 @@ async def admin_add_server(
         if len(server_url) > 2048:
             flash(request, "Server URL is too long", "error")
             return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
-            
+
     except Exception as e:
         logger.warning(f"URL validation error: {e}")
         flash(request, "Invalid server URL format", "error")
         return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     existing_server = await server_crud.get_server_by_url(db, url=server_url)
     if existing_server:
         flash(request, f"Server with URL '{server_url}' already exists.", "error")
@@ -468,6 +449,7 @@ async def admin_add_server(
             flash(request, "An error occurred while adding the server", "error")
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
 
+
 @router.post("/servers/{server_id}/delete", name="admin_delete_server", dependencies=[Depends(validate_csrf_token)])
 async def admin_delete_server(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     # Validate server_id
@@ -477,10 +459,11 @@ async def admin_delete_server(request: Request, server_id: int, db: AsyncSession
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid server ID")
-        
+
     await server_crud.delete_server(db, server_id=server_id)
     flash(request, "Server deleted successfully.", "success")
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
+
 
 @router.post("/servers/{server_id}/refresh-models", name="admin_refresh_models", dependencies=[Depends(validate_csrf_token)])
 async def admin_refresh_models(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
@@ -491,7 +474,7 @@ async def admin_refresh_models(request: Request, server_id: int, db: AsyncSessio
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid server ID")
-        
+
     result = await server_crud.fetch_and_update_models(db, server_id=server_id)
     if result["success"]:
         model_count = len(result["models"])
@@ -499,6 +482,7 @@ async def admin_refresh_models(request: Request, server_id: int, db: AsyncSessio
     else:
         flash(request, f"Failed to fetch models: {result['error']}", "error")
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
+
 
 @router.get("/servers/{server_id}/edit", response_class=HTMLResponse, name="admin_edit_server_form")
 async def admin_edit_server_form(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
@@ -509,7 +493,7 @@ async def admin_edit_server_form(request: Request, server_id: int, db: AsyncSess
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid server ID")
-        
+
     server = await server_crud.get_server_by_id(db, server_id=server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -517,6 +501,7 @@ async def admin_edit_server_form(request: Request, server_id: int, db: AsyncSess
     context["server"] = server
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/edit_server.html", context)
+
 
 @router.post("/servers/{server_id}/edit", name="admin_edit_server_post", dependencies=[Depends(validate_csrf_token)])
 async def admin_edit_server_post(
@@ -528,7 +513,7 @@ async def admin_edit_server_post(
     url: str = Form(...),
     server_type: str = Form(...),
     api_key: Optional[str] = Form(None),
-    remove_api_key: Optional[bool] = Form(False)
+    remove_api_key: Optional[bool] = Form(False),
 ):
     # Validate server_id
     try:
@@ -537,21 +522,22 @@ async def admin_edit_server_post(
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid server ID")
-        
+
     # Validate server name
     if not name or len(name) > 128:
         flash(request, "Server name is required and must be under 128 characters", "error")
         return RedirectResponse(url=request.url_for("admin_edit_server_form", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     # Validate URL (same checks as add)
     if not url or len(url) > 2048:
         flash(request, "Server URL is required and must be under 2048 characters", "error")
         return RedirectResponse(url=request.url_for("admin_edit_server_form", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     try:
         from urllib.parse import urlparse
+
         parsed = urlparse(url)
-        if parsed.scheme not in ('http', 'https'):
+        if parsed.scheme not in ("http", "https"):
             flash(request, "Only HTTP and HTTPS URLs are allowed", "error")
             return RedirectResponse(url=request.url_for("admin_edit_server_form", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
     except Exception:
@@ -566,24 +552,20 @@ async def admin_edit_server_post(
         update_data["api_key"] = api_key
 
     server_update = ServerUpdate(**update_data)
-    
+
     updated_server = await server_crud.update_server(db, server_id=server_id, server_update=server_update)
     if not updated_server:
         raise HTTPException(status_code=404, detail="Server not found")
-    
+
     flash(request, f"Server '{name}' updated successfully.", "success")
     return RedirectResponse(url=request.url_for("admin_servers"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 # --- NEW SERVER MODEL MANAGEMENT ROUTES ---
 
+
 @router.get("/servers/{server_id}/manage", response_class=HTMLResponse, name="admin_manage_server_models")
-async def admin_manage_server_models(
-    request: Request,
-    server_id: int,
-    db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user)
-):
+async def admin_manage_server_models(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     # Validate server_id
     try:
         server_id = int(server_id)
@@ -591,7 +573,7 @@ async def admin_manage_server_models(
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid server ID")
-        
+
     server = await server_crud.get_server_by_id(db, server_id=server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -601,14 +583,9 @@ async def admin_manage_server_models(
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/manage_server.html", context)
 
+
 @router.post("/servers/{server_id}/pull", name="admin_pull_model", dependencies=[Depends(validate_csrf_token)])
-async def admin_pull_model(
-    request: Request,
-    server_id: int,
-    db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
-    model_name: str = Form(...)
-):
+async def admin_pull_model(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), model_name: str = Form(...)):
     # Validate server_id
     try:
         server_id = int(server_id)
@@ -616,23 +593,23 @@ async def admin_pull_model(
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid server ID")
-        
+
     # Validate model_name
     if not model_name or len(model_name) > 256:
         flash(request, "Model name is required and must be under 256 characters", "error")
         return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     # Sanitize model name - only allow alphanumeric, dashes, dots, colons
-    if not re.match(r'^[\w\.\-:@]+$', model_name):
+    if not re.match(r"^[\w\.\-:@]+$", model_name):
         flash(request, "Model name contains invalid characters", "error")
         return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     server = await server_crud.get_server_by_id(db, server_id=server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
 
     flash(request, f"Pull initiated for '{model_name}'. This may take several minutes...", "info")
-    
+
     http_client: httpx.AsyncClient = request.app.state.http_client
     result = await server_crud.pull_model_on_server(http_client, server, model_name)
 
@@ -642,18 +619,12 @@ async def admin_pull_model(
         await server_crud.fetch_and_update_models(db, server_id=server_id)
     else:
         flash(request, result["message"], "error")
-        
+
     return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/servers/{server_id}/delete-model", name="admin_delete_model", dependencies=[Depends(validate_csrf_token)])
-async def admin_delete_model(
-    request: Request,
-    server_id: int,
-    db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
-    model_name: str = Form(...)
-):
+async def admin_delete_model(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), model_name: str = Form(...)):
     # Validate server_id
     try:
         server_id = int(server_id)
@@ -661,17 +632,17 @@ async def admin_delete_model(
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid server ID")
-        
+
     # Validate model_name
     if not model_name or len(model_name) > 256:
         flash(request, "Model name is required", "error")
         return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     # Sanitize model name
-    if not re.match(r'^[\w\.\-:@]+$', model_name):
+    if not re.match(r"^[\w\.\-:@]+$", model_name):
         flash(request, "Model name contains invalid characters", "error")
         return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     server = await server_crud.get_server_by_id(db, server_id=server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -688,14 +659,9 @@ async def admin_delete_model(
 
     return RedirectResponse(url=request.url_for("admin_manage_server_models", server_id=server_id), status_code=status.HTTP_303_SEE_OTHER)
 
+
 @router.post("/servers/{server_id}/load-model", name="admin_load_model", dependencies=[Depends(validate_csrf_token)])
-async def admin_load_model(
-    request: Request,
-    server_id: int,
-    db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
-    model_name: str = Form(...)
-):
+async def admin_load_model(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), model_name: str = Form(...)):
     # Validate server_id
     try:
         server_id = int(server_id)
@@ -703,17 +669,17 @@ async def admin_load_model(
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid server ID")
-        
+
     # Validate model_name
     if not model_name or len(model_name) > 256:
         flash(request, "Model name is required", "error")
         return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     # Sanitize model name
-    if not re.match(r'^[\w\.\-:@]+$', model_name):
+    if not re.match(r"^[\w\.\-:@]+$", model_name):
         flash(request, "Model name contains invalid characters", "error")
         return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     server = await server_crud.get_server_by_id(db, server_id=server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -722,17 +688,12 @@ async def admin_load_model(
     result = await server_crud.load_model_on_server(http_client, server, model_name)
 
     flash(request, result["message"], "success" if result["success"] else "error")
-    
+
     return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
 
+
 @router.post("/servers/{server_id}/unload-model", name="admin_unload_model", dependencies=[Depends(validate_csrf_token)])
-async def admin_unload_model(
-    request: Request,
-    server_id: int,
-    db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
-    model_name: str = Form(...)
-):
+async def admin_unload_model(request: Request, server_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), model_name: str = Form(...)):
     # Validate server_id
     try:
         server_id = int(server_id)
@@ -740,17 +701,17 @@ async def admin_unload_model(
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid server ID")
-        
+
     # Validate model_name
     if not model_name or len(model_name) > 256:
         flash(request, "Model name is required", "error")
         return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     # Sanitize model name
-    if not re.match(r'^[\w\.\-:@]+$', model_name):
+    if not re.match(r"^[\w\.\-:@]+$", model_name):
         flash(request, "Model name contains invalid characters", "error")
         return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     server = await server_crud.get_server_by_id(db, server_id=server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
@@ -759,27 +720,24 @@ async def admin_unload_model(
     result = await server_crud.unload_model_on_server(http_client, server, model_name)
 
     flash(request, result["message"], "success" if result["success"] else "error")
-    
+
     return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
+
 
 # --- NEW: Unload model from Dashboard ---
 @router.post("/models/unload", name="admin_unload_model_dashboard", dependencies=[Depends(validate_csrf_token)])
 async def admin_unload_model_dashboard(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    admin_user: User = Depends(require_admin_user),
-    model_name: str = Form(...),
-    server_name: str = Form(...)
+    request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), model_name: str = Form(...), server_name: str = Form(...)
 ):
     # Validate and sanitize inputs
-    if not model_name or len(model_name) > 256 or not re.match(r'^[\w\.\-:@]+$', model_name):
+    if not model_name or len(model_name) > 256 or not re.match(r"^[\w\.\-:@]+$", model_name):
         flash(request, "Invalid model name", "error")
         return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     if not server_name or len(server_name) > 128:
         flash(request, "Invalid server name", "error")
         return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     server = await server_crud.get_server_by_name(db, name=server_name)
     if not server:
         flash(request, f"Server '{server_name}' not found.", "error")
@@ -789,42 +747,36 @@ async def admin_unload_model_dashboard(
     result = await server_crud.unload_model_on_server(http_client, server, model_name)
 
     flash(request, result["message"], "success" if result["success"] else "error")
-    
-    await asyncio.sleep(1) # Give backend a moment to update state before reloading
-    
+
+    await asyncio.sleep(1)  # Give backend a moment to update state before reloading
+
     return RedirectResponse(url=request.url_for("admin_dashboard"), status_code=status.HTTP_303_SEE_OTHER)
+
 
 # --- MODELS MANAGER ROUTES (NEW) ---
 @router.get("/models-manager", response_class=HTMLResponse, name="admin_models_manager")
-async def admin_models_manager_page(
-    request: Request, 
-    db: AsyncSession = Depends(get_db), 
-    admin_user: User = Depends(require_admin_user)
-):
+async def admin_models_manager_page(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     context = get_template_context(request)
-    
+
     # Ensure metadata exists for all discovered models
     all_model_names = await server_crud.get_all_available_model_names(db)
     for model_name in all_model_names:
         # Validate model name before processing
-        if model_name and len(model_name) <= 256 and re.match(r'^[\w\.\-:@]+$', model_name):
+        if model_name and len(model_name) <= 256 and re.match(r"^[\w\.\-:@]+$", model_name):
             await model_metadata_crud.get_or_create_metadata(db, model_name=model_name)
-        
+
     context["metadata_list"] = await model_metadata_crud.get_all_metadata(db)
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/models_manager.html", context)
 
+
 @router.post("/models-manager/update", name="admin_update_model_metadata", dependencies=[Depends(validate_csrf_token)])
-async def admin_update_model_metadata(
-    request: Request, 
-    db: AsyncSession = Depends(get_db), 
-    admin_user: User = Depends(require_admin_user)
-):
+async def admin_update_model_metadata(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
     form_data = await request.form()
-    
+
     # A set to keep track of which models were in the form
     updated_model_ids = set()
-    
+
     # Loop through form data to find metadata fields
     for key, value in form_data.items():
         if key.startswith("description_"):
@@ -834,7 +786,7 @@ async def admin_update_model_metadata(
                     updated_model_ids.add(meta_id)
             except (ValueError, IndexError):
                 continue  # Skip invalid keys
-            
+
     # Now process each model found in the form
     for meta_id in updated_model_ids:
         metadata = await db.get(model_metadata_crud.ModelMetadata, meta_id)
@@ -843,10 +795,10 @@ async def admin_update_model_metadata(
             description = form_data.get(f"description_{meta_id}", "").strip()
             if len(description) > 1024:
                 description = description[:1024]
-                
+
             # Sanitize description - remove potentially dangerous characters
-            description = re.sub(r'[<>]', '', description)  # Remove HTML tags
-            
+            description = re.sub(r"[<>]", "", description)  # Remove HTML tags
+
             update_data = {
                 "description": description,
                 "supports_images": f"supports_images_{meta_id}" in form_data,
@@ -865,7 +817,7 @@ async def admin_settings_form(request: Request, admin_user: User = Depends(requi
     context = get_template_context(request)
     app_settings: AppSettingsModel = request.app.state.settings
     context["settings"] = app_settings
-    context["themes"] = app_settings.available_themes # Pass themes to template
+    context["themes"] = app_settings.available_themes  # Pass themes to template
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/settings.html", context)
 
@@ -877,11 +829,11 @@ async def admin_settings_post(
     admin_user: User = Depends(require_admin_user),
     logo_file: UploadFile = File(None),
     ssl_key_file: UploadFile = File(None),
-    ssl_cert_file: UploadFile = File(None)
+    ssl_cert_file: UploadFile = File(None),
 ):
     current_settings: AppSettingsModel = request.app.state.settings
     form_data = await request.form()
-    
+
     # --- Create a dictionary to hold the final updated values ---
     update_data = {}
 
@@ -898,69 +850,69 @@ async def admin_settings_post(
                 logger.warning(f"Path traversal attempt detected in logo removal: {logo_to_remove}")
                 flash(request, "Security error: Invalid logo path", "error")
                 return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
-            
+
             # Only remove if validation passed
             try:
-                if logo_to_remove.exists(): 
+                if logo_to_remove.exists():
                     os.remove(logo_to_remove)
             except OSError as e:
                 logger.error(f"Error removing logo file: {e}")
                 # Continue - don't let file system errors stop the update
-                
+
         final_logo_url = None
         flash(request, "Logo removed successfully.", "success")
-        
+
     elif logo_file and logo_file.filename:
         # SECURITY: Validate file upload
         safe_filename = sanitize_filename(logo_file.filename)
-        
+
         if not safe_filename:
             flash(request, "Invalid filename", "error")
             return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
-            
+
         # Validate extension
         if not validate_file_extension(safe_filename, ALLOWED_LOGO_EXTENSIONS):
             flash(request, f"Invalid file type. Allowed: {', '.join(ALLOWED_LOGO_EXTENSIONS)}", "error")
             return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
-            
+
         # Validate content type
         content_type = logo_file.content_type or ""
         if not validate_content_type(content_type, ALLOWED_LOGO_TYPES):
             flash(request, f"Invalid content type: {content_type}", "error")
             return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
         # Check file size
         file_content = await logo_file.read()
         if len(file_content) > MAX_LOGO_SIZE_BYTES:
             flash(request, f"File too large. Max size: {MAX_LOGO_SIZE_MB}MB", "error")
             return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
         # Re-read for saving (or use the content we already read)
         file_ext = Path(safe_filename).suffix
         secure_filename = f"{secrets.token_hex(16)}{file_ext}"
         save_path = UPLOADS_DIR / secure_filename
-        
+
         # SECURITY FIX: Use the new robust path validation helper
         if not is_path_within_directory(save_path, UPLOADS_DIR):
             flash(request, "Invalid save path", "error")
             return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
         try:
-            with open(save_path, "wb") as buffer: 
+            with open(save_path, "wb") as buffer:
                 buffer.write(file_content)
-                
+
             # Remove old logo if it was uploaded
             if is_uploaded_logo:
                 old_logo_path = Path("app" + current_settings.branding_logo_url)
                 if is_path_within_directory(old_logo_path, UPLOADS_DIR):
                     try:
-                        if old_logo_path.exists(): 
+                        if old_logo_path.exists():
                             os.remove(old_logo_path)
                     except OSError:
                         logger.warning(f"Could not remove old logo: {old_logo_path}")
                 else:
                     logger.warning(f"Old logo path is outside uploads directory: {old_logo_path}")
-                    
+
             final_logo_url = f"/static/uploads/{secure_filename}"
             flash(request, "New logo uploaded successfully.", "success")
         except Exception as e:
@@ -977,25 +929,22 @@ async def admin_settings_post(
             # Basic URL validation
             try:
                 from urllib.parse import urlparse
+
                 parsed = urlparse(url_input)
-                if parsed.scheme not in ('http', 'https', ''):
+                if parsed.scheme not in ("http", "https", ""):
                     raise ValueError
             except Exception:
                 flash(request, "Invalid logo URL format", "error")
                 return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
         final_logo_url = url_input if url_input else None
-        
+
     update_data["branding_logo_url"] = final_logo_url
 
     # --- Handle SSL File Logic ---
     async def process_ssl_file(
-        file_upload: UploadFile, 
-        current_path: Optional[str],
-        current_content: Optional[str],
-        remove_flag: bool,
-        file_type: str # 'key' or 'cert'
+        file_upload: UploadFile, current_path: Optional[str], current_content: Optional[str], remove_flag: bool, file_type: str  # 'key' or 'cert'
     ) -> (Optional[str], Optional[str]):
-        
+
         # SECURITY FIX: Use cryptographically secure random filename to prevent prediction attacks
         managed_filename = f"{secrets.token_hex(16)}_{file_type}.pem"
         managed_path = SSL_DIR / managed_filename
@@ -1023,37 +972,37 @@ async def admin_settings_post(
         if file_upload and file_upload.filename:
             # Validate filename
             safe_name = sanitize_filename(file_upload.filename)
-            if not safe_name or not safe_name.endswith('.pem'):
+            if not safe_name or not safe_name.endswith(".pem"):
                 flash(request, f"SSL {file_type} file must have .pem extension", "error")
                 return current_path, current_content
-                
+
             try:
                 content_bytes = await file_upload.read()
-                
+
                 # Validate PEM format
-                content_str = content_bytes.decode('utf-8', errors='strict')
-                
+                content_str = content_bytes.decode("utf-8", errors="strict")
+
                 # Basic PEM validation
-                if file_type == 'key':
-                    if 'PRIVATE KEY' not in content_str:
+                if file_type == "key":
+                    if "PRIVATE KEY" not in content_str:
                         flash(request, "Invalid private key format", "error")
                         return current_path, current_content
                 else:  # cert
-                    if 'CERTIFICATE' not in content_str:
+                    if "CERTIFICATE" not in content_str:
                         flash(request, "Invalid certificate format", "error")
                         return current_path, current_content
-                
+
                 # Check for suspicious content
-                if re.search(r'[^\x20-\x7E\s]', content_str):  # Non-printable chars
+                if re.search(r"[^\x20-\x7E\s]", content_str):  # Non-printable chars
                     flash(request, f"SSL {file_type} file contains invalid characters", "error")
                     return current_path, current_content
-                
-                with open(managed_path, "w", encoding='utf-8') as f:
+
+                with open(managed_path, "w", encoding="utf-8") as f:
                     f.write(content_str)
-                    
+
                 flash(request, f"New SSL {file_type} file uploaded successfully.", "success")
                 return str(managed_path), content_str
-                
+
             except UnicodeDecodeError:
                 flash(request, f"SSL {file_type} file must be valid UTF-8 text", "error")
                 return current_path, current_content
@@ -1068,7 +1017,7 @@ async def admin_settings_post(
             # Validate path
             if len(form_path) > 2048:
                 return current_path, current_content
-                
+
             # Security check: prevent path traversal
             try:
                 path_obj = Path(form_path).resolve()
@@ -1085,7 +1034,7 @@ async def admin_settings_post(
             except (ValueError, RuntimeError):
                 logger.warning(f"Path traversal attempt in SSL path: {form_path}")
                 return current_path, current_content
-                
+
             # If a path is specified, it overrides any uploaded file
             if managed_path.exists():
                 try:
@@ -1098,43 +1047,54 @@ async def admin_settings_post(
         return current_path, current_content
 
     update_data["ssl_keyfile"], update_data["ssl_keyfile_content"] = await process_ssl_file(
-        ssl_key_file, current_settings.ssl_keyfile, current_settings.ssl_keyfile_content,
-        bool(form_data.get("remove_ssl_key")), "key"
+        ssl_key_file, current_settings.ssl_keyfile, current_settings.ssl_keyfile_content, bool(form_data.get("remove_ssl_key")), "key"
     )
     update_data["ssl_certfile"], update_data["ssl_certfile_content"] = await process_ssl_file(
-        ssl_cert_file, current_settings.ssl_certfile, current_settings.ssl_certfile_content,
-        bool(form_data.get("remove_ssl_cert")), "cert"
+        ssl_cert_file, current_settings.ssl_certfile, current_settings.ssl_certfile_content, bool(form_data.get("remove_ssl_cert")), "cert"
     )
-    
+
     # --- Update other settings ---
     selected_theme = form_data.get("selected_theme", current_settings.selected_theme)
     if selected_theme not in current_settings.available_themes:
         selected_theme = current_settings.selected_theme
-        
+
     ui_style = form_data.get("ui_style", current_settings.ui_style)
-    allowed_styles = ['dark-glass', 'dark-flat', 'black', 'light-glass', 'light-flat', 'white', 
-                      'aurora', 'dark-neumorphic', 'light-neumorphic', 'brutalism', 
-                      'retro-terminal', 'cyberpunk', 'material-flat', 'ink']
+    allowed_styles = [
+        "dark-glass",
+        "dark-flat",
+        "black",
+        "light-glass",
+        "light-flat",
+        "white",
+        "aurora",
+        "dark-neumorphic",
+        "light-neumorphic",
+        "brutalism",
+        "retro-terminal",
+        "cyberpunk",
+        "material-flat",
+        "ink",
+    ]
     if ui_style not in allowed_styles:
         ui_style = current_settings.ui_style
-        
+
     new_redis_password = form_data.get("redis_password", "")
     if new_redis_password and len(new_redis_password) > 256:
         flash(request, "Redis password too long", "error")
         return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
-    
+
     # Validate Redis connection parameters
     redis_host = form_data.get("redis_host", current_settings.redis_host)
     if not redis_host or len(redis_host) > 256:
         redis_host = current_settings.redis_host
-        
+
     try:
         redis_port = int(form_data.get("redis_port", current_settings.redis_port))
         if redis_port < 1 or redis_port > 65535:
             redis_port = current_settings.redis_port
     except (ValueError, TypeError):
         redis_port = current_settings.redis_port
-        
+
     try:
         model_update_interval = int(form_data.get("model_update_interval_minutes", 10))
         if model_update_interval < 1 or model_update_interval > 1440:  # Max 24 hours
@@ -1177,30 +1137,29 @@ async def admin_settings_post(
     except (ValueError, TypeError):
         rate_limit_window_minutes = current_settings.rate_limit_window_minutes
 
-    
-    update_data.update({
-        "branding_title": form_data.get("branding_title", current_settings.branding_title)[:128],
-        "ui_style": ui_style,
-        "selected_theme": selected_theme,
-        "redis_host": redis_host,
-        "redis_port": redis_port,
-        "redis_username": (form_data.get("redis_username") or None)[:128] if form_data.get("redis_username") else None,
-        "model_update_interval_minutes": model_update_interval,
+    update_data.update(
+        {
+            "branding_title": form_data.get("branding_title", current_settings.branding_title)[:128],
+            "ui_style": ui_style,
+            "selected_theme": selected_theme,
+            "redis_host": redis_host,
+            "redis_port": redis_port,
+            "redis_username": (form_data.get("redis_username") or None)[:128] if form_data.get("redis_username") else None,
+            "model_update_interval_minutes": model_update_interval,
+            "max_retries": max_retries,
+            "retry_total_timeout_seconds": retry_total_timeout_seconds,
+            "retry_base_delay_ms": retry_base_delay_ms,
+            "rate_limit_requests": rate_limit_requests,
+            "rate_limit_window_minutes": rate_limit_window_minutes,
+            "allowed_ips": form_data.get("allowed_ips", "")[:2048],
+            "denied_ips": form_data.get("denied_ips", "")[:2048],
+            "blocked_ollama_endpoints": form_data.get("blocked_ollama_endpoints", "")[:1024],
+        }
+    )
 
-        "max_retries": max_retries,
-        "retry_total_timeout_seconds": retry_total_timeout_seconds,
-        "retry_base_delay_ms": retry_base_delay_ms,
-        "rate_limit_requests": rate_limit_requests,
-        "rate_limit_window_minutes": rate_limit_window_minutes,
-
-        "allowed_ips": form_data.get("allowed_ips", "")[:2048],
-        "denied_ips": form_data.get("denied_ips", "")[:2048],
-        "blocked_ollama_endpoints": form_data.get("blocked_ollama_endpoints", "")[:1024],
-    })
-    
     if new_redis_password:
         update_data["redis_password"] = new_redis_password
-        
+
     try:
         updated_settings_data = current_settings.model_copy(update=update_data)
         await settings_crud.update_app_settings(db, settings_data=updated_settings_data)
@@ -1215,7 +1174,9 @@ async def admin_settings_post(
 
     return RedirectResponse(url=request.url_for("admin_settings"), status_code=status.HTTP_303_SEE_OTHER)
 
+
 # --- USER MANAGEMENT ROUTES ---
+
 
 @router.get("/users", response_class=HTMLResponse, name="admin_users")
 async def admin_user_management(
@@ -1231,7 +1192,7 @@ async def admin_user_management(
         sort_by = "username"
     if sort_order not in ["asc", "desc"]:
         sort_order = "asc"
-        
+
     context = get_template_context(request)
     context["users"] = await user_crud.get_users(db, sort_by=sort_by, sort_order=sort_order)
     context["csrf_token"] = await get_csrf_token(request)
@@ -1239,18 +1200,21 @@ async def admin_user_management(
     context["sort_order"] = sort_order
     return templates.TemplateResponse("admin/users.html", context)
 
+
 @router.post("/users", name="create_new_user", dependencies=[Depends(validate_csrf_token)])
-async def create_new_user(request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), username: str = Form(...), password: str = Form(...)):
+async def create_new_user(
+    request: Request, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user), username: str = Form(...), password: str = Form(...)
+):
     # Validate username
-    if not username or len(username) > 128 or not re.match(r'^[\w.-]+$', username):
+    if not username or len(username) > 128 or not re.match(r"^[\w.-]+$", username):
         flash(request, "Username must be 1-128 characters and contain only letters, numbers, dots, dashes, and underscores", "error")
         return RedirectResponse(url=request.url_for("admin_users"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     # Validate password strength
     if not password or len(password) < 8:
         flash(request, "Password must be at least 8 characters", "error")
         return RedirectResponse(url=request.url_for("admin_users"), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     existing_user = await user_crud.get_user_by_username(db, username=username)
     if existing_user:
         flash(request, f"User '{username}' already exists.", "error")
@@ -1259,6 +1223,7 @@ async def create_new_user(request: Request, db: AsyncSession = Depends(get_db), 
         await user_crud.create_user(db, user=user_in)
         flash(request, f"User '{username}' created successfully.", "success")
     return RedirectResponse(url=request.url_for("admin_users"), status_code=status.HTTP_303_SEE_OTHER)
+
 
 @router.get("/users/{user_id}/edit", response_class=HTMLResponse, name="admin_edit_user_form")
 async def admin_edit_user_form(request: Request, user_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
@@ -1269,7 +1234,7 @@ async def admin_edit_user_form(request: Request, user_id: int, db: AsyncSession 
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid user ID")
-        
+
     user = await user_crud.get_user_by_id(db, user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -1278,6 +1243,7 @@ async def admin_edit_user_form(request: Request, user_id: int, db: AsyncSession 
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/edit_user.html", context)
 
+
 @router.post("/users/{user_id}/edit", name="admin_edit_user_post", dependencies=[Depends(validate_csrf_token)])
 async def admin_edit_user_post(
     request: Request,
@@ -1285,7 +1251,7 @@ async def admin_edit_user_post(
     db: AsyncSession = Depends(get_db),
     admin_user: User = Depends(require_admin_user),
     username: str = Form(...),
-    password: Optional[str] = Form(None)
+    password: Optional[str] = Form(None),
 ):
     # Validate user_id
     try:
@@ -1294,12 +1260,12 @@ async def admin_edit_user_post(
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid user ID")
-        
+
     # Validate username
-    if not username or len(username) > 128 or not re.match(r'^[\w.-]+$', username):
+    if not username or len(username) > 128 or not re.match(r"^[\w.-]+$", username):
         flash(request, "Invalid username format", "error")
         return RedirectResponse(url=request.url_for("admin_edit_user_form", user_id=user_id), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     # Validate password if provided
     if password and len(password) < 8:
         flash(request, "Password must be at least 8 characters", "error")
@@ -1314,9 +1280,10 @@ async def admin_edit_user_post(
     updated_user = await user_crud.update_user(db, user_id=user_id, username=username, password=password)
     if not updated_user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     flash(request, f"User '{username}' updated successfully.", "success")
     return RedirectResponse(url=request.url_for("admin_users"), status_code=status.HTTP_303_SEE_OTHER)
+
 
 @router.get("/users/{user_id}", response_class=HTMLResponse, name="get_user_details")
 async def get_user_details(request: Request, user_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
@@ -1327,14 +1294,16 @@ async def get_user_details(request: Request, user_id: int, db: AsyncSession = De
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid user ID")
-        
+
     context = get_template_context(request)
     user = await user_crud.get_user_by_id(db, user_id=user_id)
-    if not user: raise HTTPException(status_code=404, detail="User not found")
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
     context["user"] = user
     context["api_keys"] = await apikey_crud.get_api_keys_for_user(db, user_id=user_id)
     context["csrf_token"] = await get_csrf_token(request)
     return templates.TemplateResponse("admin/user_details.html", context)
+
 
 @router.get("/users/{user_id}/stats", response_class=HTMLResponse, name="admin_user_stats")
 async def admin_user_stats(
@@ -1350,37 +1319,35 @@ async def admin_user_stats(
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid user ID")
-        
+
     user = await user_crud.get_user_by_id(db, user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-        
+
     context = get_template_context(request)
-    
+
     daily_stats = await log_crud.get_daily_usage_stats_for_user(db, user_id=user_id, days=30)
     hourly_stats = await log_crud.get_hourly_usage_stats_for_user(db, user_id=user_id)
     server_stats = await log_crud.get_server_load_stats_for_user(db, user_id=user_id)
     model_stats = await log_crud.get_model_usage_stats_for_user(db, user_id=user_id)
 
-    context.update({
-        "user": user,
-        "daily_labels": [
-            row.date if isinstance(row.date, str) 
-            else row.date.strftime('%Y-%m-%d') if hasattr(row.date, 'strftime')
-            else str(row.date)
-            for row in daily_stats
-        ],
-        "daily_data": [row.request_count for row in daily_stats],
-        "hourly_labels": [row['hour'] for row in hourly_stats],
-        "hourly_data": [row['request_count'] for row in hourly_stats],
-        "server_labels": [row.server_name for row in server_stats if row.server_name],
-        "server_data": [row.request_count for row in server_stats if row.server_name],
-        "model_labels": [row.model_name for row in model_stats],
-        "model_data": [row.request_count for row in model_stats],
-    })
-    
+    context.update(
+        {
+            "user": user,
+            "daily_labels": [row.date if isinstance(row.date, str) else row.date.strftime("%Y-%m-%d") if hasattr(row.date, "strftime") else str(row.date) for row in daily_stats],
+            "daily_data": [row.request_count for row in daily_stats],
+            "hourly_labels": [row["hour"] for row in hourly_stats],
+            "hourly_data": [row["request_count"] for row in hourly_stats],
+            "server_labels": [row.server_name for row in server_stats if row.server_name],
+            "server_data": [row.request_count for row in server_stats if row.server_name],
+            "model_labels": [row.model_name for row in model_stats],
+            "model_data": [row.request_count for row in model_stats],
+        }
+    )
+
     # Create a new template for this
     return templates.TemplateResponse("admin/user_statistics.html", context)
+
 
 @router.post("/users/{user_id}/keys/create", name="admin_create_key", dependencies=[Depends(validate_csrf_token)])
 async def create_user_api_key(
@@ -1399,19 +1366,19 @@ async def create_user_api_key(
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid user ID")
-        
+
     # Validate key_name
     if not key_name or len(key_name) > 128:
         flash(request, "Key name is required and must be under 128 characters", "error")
         return RedirectResponse(url=request.url_for("get_user_details", user_id=user_id), status_code=status.HTTP_303_SEE_OTHER)
-        
+
     # Validate rate limits
     try:
         if rate_limit_requests is not None:
             rate_limit_requests = int(rate_limit_requests)
             if rate_limit_requests < 0 or rate_limit_requests > 1000000:
                 rate_limit_requests = None
-                
+
         if rate_limit_window_minutes is not None:
             rate_limit_window_minutes = int(rate_limit_window_minutes)
             if rate_limit_window_minutes < 1 or rate_limit_window_minutes > 10080:  # Max 1 week
@@ -1427,20 +1394,17 @@ async def create_user_api_key(
         return RedirectResponse(url=request.url_for("get_user_details", user_id=user_id), status_code=status.HTTP_303_SEE_OTHER)
 
     current_admin_id = admin_user.id
-    
+
     plain_key, _ = await apikey_crud.create_api_key(
-        db, 
-        user_id=user_id, 
-        key_name=key_name,
-        rate_limit_requests=rate_limit_requests,
-        rate_limit_window_minutes=rate_limit_window_minutes
+        db, user_id=user_id, key_name=key_name, rate_limit_requests=rate_limit_requests, rate_limit_window_minutes=rate_limit_window_minutes
     )
-    
+
     context = get_template_context(request)
     context["plain_key"] = plain_key
     context["user_id"] = user_id
-    request.state.user = await db.get(User, current_admin_id) # For base template
+    request.state.user = await db.get(User, current_admin_id)  # For base template
     return templates.TemplateResponse("admin/key_created.html", context)
+
 
 @router.post("/keys/{key_id}/toggle-active", name="admin_toggle_key_active", dependencies=[Depends(validate_csrf_token)])
 async def toggle_key_active_status(
@@ -1456,14 +1420,15 @@ async def toggle_key_active_status(
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid key ID")
-        
+
     key = await apikey_crud.toggle_api_key_active(db, key_id=key_id)
     if not key:
         raise HTTPException(status_code=404, detail="API Key not found or already revoked")
-    
+
     new_status = "enabled" if key.is_active else "disabled"
     flash(request, f"API Key '{key.key_name}' has been {new_status}.", "success")
     return RedirectResponse(url=request.url_for("get_user_details", user_id=key.user_id), status_code=status.HTTP_303_SEE_OTHER)
+
 
 @router.post("/keys/{key_id}/revoke", name="admin_revoke_key", dependencies=[Depends(validate_csrf_token)])
 async def revoke_user_api_key(
@@ -1479,14 +1444,15 @@ async def revoke_user_api_key(
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid key ID")
-        
+
     key = await apikey_crud.get_api_key_by_id(db, key_id=key_id)
     if not key:
         raise HTTPException(status_code=404, detail="API Key not found")
-    
+
     await apikey_crud.revoke_api_key(db, key_id=key_id)
     flash(request, f"API Key '{key.key_name}' has been revoked.", "success")
     return RedirectResponse(url=request.url_for("get_user_details", user_id=key.user_id), status_code=status.HTTP_303_SEE_OTHER)
+
 
 @router.post("/users/{user_id}/delete", name="delete_user_account", dependencies=[Depends(validate_csrf_token)])
 async def delete_user_account(request: Request, user_id: int, db: AsyncSession = Depends(get_db), admin_user: User = Depends(require_admin_user)):
@@ -1497,14 +1463,14 @@ async def delete_user_account(request: Request, user_id: int, db: AsyncSession =
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid user ID")
-        
+
     user = await user_crud.get_user_by_id(db, user_id=user_id)
-    if not user: raise HTTPException(status_code=404, detail="User not found")
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
     if user.is_admin:
         flash(request, "Cannot delete an admin account.", "error")
         return RedirectResponse(url=request.url_for("admin_users"), status_code=status.HTTP_303_SEE_OTHER)
-    
+
     await user_crud.delete_user(db, user_id=user_id)
     flash(request, f"User '{user.username}' has been deleted.", "success")
     return RedirectResponse(url=request.url_for("admin_users"), status_code=status.HTTP_303_SEE_OTHER)
-

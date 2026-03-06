@@ -1,20 +1,22 @@
 # app/crud/log_crud.py
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import func, select, text, Date
+from sqlalchemy import func, select
 from app.database.models import UsageLog, APIKey, User, OllamaServer
 import datetime
-from typing import Optional, List
+from typing import Optional
+
 
 async def create_usage_log(
-    db: AsyncSession, *, 
-    api_key_id: int, 
-    endpoint: str, 
-    status_code: int, 
-    server_id: Optional[int] = None, 
+    db: AsyncSession,
+    *,
+    api_key_id: int,
+    endpoint: str,
+    status_code: int,
+    server_id: Optional[int] = None,
     model: Optional[str] = None,
     prompt_tokens: Optional[int] = None,
     completion_tokens: Optional[int] = None,
-    total_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None,
 ) -> UsageLog:
     # Validate inputs to prevent injection
     if not isinstance(api_key_id, int) or api_key_id <= 0:
@@ -25,7 +27,7 @@ async def create_usage_log(
         raise ValueError("Invalid status_code")
     if model is not None and (not isinstance(model, str) or len(model) > 256):
         raise ValueError("Invalid model name")
-    
+
     # Validate token counts
     if prompt_tokens is not None:
         prompt_tokens = max(0, int(prompt_tokens))
@@ -35,7 +37,7 @@ async def create_usage_log(
         total_tokens = max(0, int(total_tokens))
     elif prompt_tokens is not None and completion_tokens is not None:
         total_tokens = prompt_tokens + completion_tokens
-        
+
     db_log = UsageLog(
         api_key_id=api_key_id,
         endpoint=endpoint[:512],  # Limit length
@@ -44,7 +46,7 @@ async def create_usage_log(
         model=model[:256] if model else None,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
-        total_tokens=total_tokens
+        total_tokens=total_tokens,
     )
     db.add(db_log)
     await db.commit()
@@ -52,11 +54,7 @@ async def create_usage_log(
     return db_log
 
 
-async def get_usage_statistics(
-    db: AsyncSession, 
-    sort_by: str = "request_count", 
-    sort_order: str = "desc"
-):
+async def get_usage_statistics(db: AsyncSession, sort_by: str = "request_count", sort_order: str = "desc"):
     """
     Returns aggregated usage statistics for all API keys, with sorting.
     Includes token usage totals.
@@ -69,7 +67,7 @@ async def get_usage_statistics(
         "request_count": func.count(UsageLog.id),
         "total_tokens": func.coalesce(func.sum(UsageLog.total_tokens), 0),
     }
-    
+
     # Default to request_count if invalid column provided
     sort_column = allowed_sort_columns.get(sort_by, func.count(UsageLog.id))
 
@@ -106,6 +104,7 @@ async def get_usage_statistics(
 
 # --- NEW STATISTICS FUNCTIONS ---
 
+
 async def get_daily_usage_stats(db: AsyncSession, days: int = 30):
     """Returns total requests and tokens per day for the last N days."""
     # Validate days parameter
@@ -115,13 +114,13 @@ async def get_daily_usage_stats(db: AsyncSession, days: int = 30):
             days = 30
     except (ValueError, TypeError):
         days = 30
-    
+
     start_date = datetime.datetime.utcnow() - datetime.timedelta(days=days)
-    
+
     # Use SQLAlchemy's func.date with explicit type - SAFE from injection
     # The type_=Date is a SQLAlchemy type object, not user input
     date_column = func.date(UsageLog.request_timestamp).label("date")
-    
+
     stmt = (
         select(
             date_column,
@@ -141,8 +140,8 @@ async def get_daily_usage_stats(db: AsyncSession, days: int = 30):
 async def get_hourly_usage_stats(db: AsyncSession):
     """Returns total requests and tokens aggregated by the hour of the day (UTC)."""
     # Use safe SQLAlchemy constructs only
-    hour_extract = func.strftime('%H', UsageLog.request_timestamp)
-    
+    hour_extract = func.strftime("%H", UsageLog.request_timestamp)
+
     stmt = (
         select(
             hour_extract.label("hour"),
@@ -156,19 +155,31 @@ async def get_hourly_usage_stats(db: AsyncSession):
     )
     result = await db.execute(stmt)
     # Ensure all 24 hours are present
-    stats_dict = {row.hour: {
-        "request_count": row.request_count,
-        "total_prompt_tokens": row.total_prompt_tokens,
-        "total_completion_tokens": row.total_completion_tokens,
-        "total_tokens": row.total_tokens,
-    } for row in result.all()}
-    
-    return [{"hour": f"{h:02d}:00", **stats_dict.get(f"{h:02d}", {
-        "request_count": 0,
-        "total_prompt_tokens": 0,
-        "total_completion_tokens": 0,
-        "total_tokens": 0,
-    })} for h in range(24)]
+    stats_dict = {
+        row.hour: {
+            "request_count": row.request_count,
+            "total_prompt_tokens": row.total_prompt_tokens,
+            "total_completion_tokens": row.total_completion_tokens,
+            "total_tokens": row.total_tokens,
+        }
+        for row in result.all()
+    }
+
+    return [
+        {
+            "hour": f"{h:02d}:00",
+            **stats_dict.get(
+                f"{h:02d}",
+                {
+                    "request_count": 0,
+                    "total_prompt_tokens": 0,
+                    "total_completion_tokens": 0,
+                    "total_tokens": 0,
+                },
+            ),
+        }
+        for h in range(24)
+    ]
 
 
 async def get_server_load_stats(db: AsyncSession):
@@ -210,6 +221,7 @@ async def get_model_usage_stats(db: AsyncSession):
 
 # --- NEW USER-SPECIFIC STATISTICS FUNCTIONS ---
 
+
 async def get_daily_usage_stats_for_user(db: AsyncSession, user_id: int, days: int = 30):
     """Returns total requests and tokens per day for the last N days for a specific user."""
     # Validate inputs
@@ -219,19 +231,19 @@ async def get_daily_usage_stats_for_user(db: AsyncSession, user_id: int, days: i
             raise ValueError("Invalid user_id")
     except (ValueError, TypeError):
         raise ValueError("Invalid user_id")
-        
+
     try:
         days = int(days)
         if days < 1 or days > 365:
             days = 30
     except (ValueError, TypeError):
         days = 30
-        
+
     start_date = datetime.datetime.utcnow() - datetime.timedelta(days=days)
-    
+
     # Safe SQLAlchemy construct
     date_column = func.date(UsageLog.request_timestamp).label("date")
-    
+
     stmt = (
         select(
             date_column,
@@ -259,9 +271,9 @@ async def get_hourly_usage_stats_for_user(db: AsyncSession, user_id: int):
             raise ValueError("Invalid user_id")
     except (ValueError, TypeError):
         raise ValueError("Invalid user_id")
-        
-    hour_extract = func.strftime('%H', UsageLog.request_timestamp)
-    
+
+    hour_extract = func.strftime("%H", UsageLog.request_timestamp)
+
     stmt = (
         select(
             hour_extract.label("hour"),
@@ -276,19 +288,31 @@ async def get_hourly_usage_stats_for_user(db: AsyncSession, user_id: int):
         .order_by("hour")
     )
     result = await db.execute(stmt)
-    stats_dict = {row.hour: {
-        "request_count": row.request_count,
-        "total_prompt_tokens": row.total_prompt_tokens,
-        "total_completion_tokens": row.total_completion_tokens,
-        "total_tokens": row.total_tokens,
-    } for row in result.all()}
-    
-    return [{"hour": f"{h:02d}:00", **stats_dict.get(f"{h:02d}", {
-        "request_count": 0,
-        "total_prompt_tokens": 0,
-        "total_completion_tokens": 0,
-        "total_tokens": 0,
-    })} for h in range(24)]
+    stats_dict = {
+        row.hour: {
+            "request_count": row.request_count,
+            "total_prompt_tokens": row.total_prompt_tokens,
+            "total_completion_tokens": row.total_completion_tokens,
+            "total_tokens": row.total_tokens,
+        }
+        for row in result.all()
+    }
+
+    return [
+        {
+            "hour": f"{h:02d}:00",
+            **stats_dict.get(
+                f"{h:02d}",
+                {
+                    "request_count": 0,
+                    "total_prompt_tokens": 0,
+                    "total_completion_tokens": 0,
+                    "total_tokens": 0,
+                },
+            ),
+        }
+        for h in range(24)
+    ]
 
 
 async def get_server_load_stats_for_user(db: AsyncSession, user_id: int):
@@ -300,7 +324,7 @@ async def get_server_load_stats_for_user(db: AsyncSession, user_id: int):
             raise ValueError("Invalid user_id")
     except (ValueError, TypeError):
         raise ValueError("Invalid user_id")
-        
+
     stmt = (
         select(
             OllamaServer.name.label("server_name"),
@@ -329,7 +353,7 @@ async def get_model_usage_stats_for_user(db: AsyncSession, user_id: int):
             raise ValueError("Invalid user_id")
     except (ValueError, TypeError):
         raise ValueError("Invalid user_id")
-        
+
     stmt = (
         select(
             UsageLog.model.label("model_name"),
@@ -349,23 +373,17 @@ async def get_model_usage_stats_for_user(db: AsyncSession, user_id: int):
 
 
 async def update_usage_log_with_tokens(
-    db: AsyncSession,
-    log_id: int,
-    prompt_tokens: Optional[int] = None,
-    completion_tokens: Optional[int] = None,
-    total_tokens: Optional[int] = None
+    db: AsyncSession, log_id: int, prompt_tokens: Optional[int] = None, completion_tokens: Optional[int] = None, total_tokens: Optional[int] = None
 ) -> Optional[UsageLog]:
     """Updates an existing usage log entry with token counts."""
     try:
-        result = await db.execute(
-            select(UsageLog).filter(UsageLog.id == log_id)
-        )
+        result = await db.execute(select(UsageLog).filter(UsageLog.id == log_id))
         log_entry = result.scalars().first()
-        
+
         if not log_entry:
             logger.warning(f"Usage log entry {log_id} not found for token update")
             return None
-        
+
         # Validate and update token counts
         if prompt_tokens is not None:
             log_entry.prompt_tokens = max(0, int(prompt_tokens))
@@ -375,11 +393,11 @@ async def update_usage_log_with_tokens(
             log_entry.total_tokens = max(0, int(total_tokens))
         elif prompt_tokens is not None and completion_tokens is not None:
             log_entry.total_tokens = log_entry.prompt_tokens + log_entry.completion_tokens
-            
+
         await db.commit()
         await db.refresh(log_entry)
         return log_entry
-        
+
     except Exception as e:
         logger.error(f"Failed to update usage log {log_id} with tokens: {e}")
         return None

@@ -1,25 +1,28 @@
 # app/models/catalog.py
-import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from enum import Enum
 
+
 class ModelTier(Enum):
-    NANO = "nano"           # ≤3B params, <2GB VRAM
-    FAST = "fast"           # ≤8B params, <6GB VRAM
-    BALANCED = "balanced"   # ≤14B params, <10GB VRAM
-    DEEP = "deep"           # >14B params, CPU offload
+    NANO = "nano"  # ≤3B params, <2GB VRAM
+    FAST = "fast"  # ≤8B params, <6GB VRAM
+    BALANCED = "balanced"  # ≤14B params, <10GB VRAM
+    DEEP = "deep"  # >14B params, CPU offload
+
 
 class ModelSource(Enum):
     LOCAL = "local"
     CLOUD = "cloud"
+
 
 class ModelStatus(Enum):
     HEALTHY = "healthy"
     WARNING = "warning"
     DEGRADED = "degraded"
     OFFLINE = "offline"
+
 
 @dataclass(slots=True)
 class PerformanceMetrics:
@@ -37,8 +40,9 @@ class PerformanceMetrics:
             "benchmark_score": self.benchmark_score,
             "timeout_rate": self.timeout_rate,
             "error_rate": self.error_rate,
-            "last_benchmark_at": self.last_benchmark_at.isoformat() if self.last_benchmark_at else None
+            "last_benchmark_at": self.last_benchmark_at.isoformat() if self.last_benchmark_at else None,
         }
+
 
 @dataclass(slots=True)
 class LocalModel:
@@ -53,6 +57,9 @@ class LocalModel:
     family: str = "unknown"
     context_length: int = 4096
     capabilities: List[str] = field(default_factory=list)
+    hidden_size: Optional[int] = None
+    num_layers: Optional[int] = None
+    vocab_size: Optional[int] = None
     installed_at: datetime = field(default_factory=datetime.utcnow)
     last_used: datetime = field(default_factory=datetime.utcnow)
     metrics: PerformanceMetrics = field(default_factory=PerformanceMetrics)
@@ -60,12 +67,28 @@ class LocalModel:
 
     @property
     def size_gb(self) -> float:
-        return self.size_bytes / (1024 ** 3)
+        return self.size_bytes / (1024**3)
 
     @property
     def fits_hardware(self) -> bool:
-        """Check if model fits RTX 3060 12GB constraints (10GB max)."""
-        return self.size_gb <= 10.0
+        """Check if model + KV cache fits RTX 3060 12GB constraints (10GB max)."""
+        if not self.hidden_size or not self.num_layers:
+            return self.size_gb <= 7.0  # Conservative 3GB headroom
+
+        context_length = min(self.context_length, 8192)
+        kv_cache_bytes = 2 * self.num_layers * self.hidden_size * context_length * 2
+        kv_cache_gb = kv_cache_bytes / (1024**3)
+        total_required = self.size_gb + kv_cache_gb
+        return total_required <= 10.0  # RTX 3060 12GB less 2GB system overhead
+
+    @property
+    def estimated_kv_cache_gb(self) -> float:
+        """Calculate KV cache footprint for given context length."""
+        target_context = 8192
+        if not self.hidden_size or not self.num_layers:
+            return 2.0
+        bytes_required = 2 * self.num_layers * self.hidden_size * target_context * 2
+        return bytes_required / (1024**3)
 
     @property
     def full_name(self) -> str:
@@ -85,11 +108,15 @@ class LocalModel:
             "family": self.family,
             "context_length": self.context_length,
             "capabilities": self.capabilities,
+            "hidden_size": self.hidden_size,
+            "num_layers": self.num_layers,
+            "vocab_size": self.vocab_size,
+            "estimated_kv_cache_gb": round(self.estimated_kv_cache_gb, 2),
             "installed_at": self.installed_at.isoformat(),
             "last_used": self.last_used.isoformat(),
             "metrics": self.metrics.to_dict(),
             "status": self.status.value,
-            "fits_hardware": self.fits_hardware
+            "fits_hardware": self.fits_hardware,
         }
 
     @classmethod
@@ -104,7 +131,7 @@ class LocalModel:
             benchmark_score=metrics_data.get("benchmark_score"),
             timeout_rate=metrics_data.get("timeout_rate", 0.0),
             error_rate=metrics_data.get("error_rate", 0.0),
-            last_benchmark_at=datetime.fromisoformat(metrics_data["last_benchmark_at"]) if metrics_data.get("last_benchmark_at") else None
+            last_benchmark_at=datetime.fromisoformat(metrics_data["last_benchmark_at"]) if metrics_data.get("last_benchmark_at") else None,
         )
 
         return cls(
@@ -119,11 +146,15 @@ class LocalModel:
             family=data["family"],
             context_length=data["context_length"],
             capabilities=data.get("capabilities", []),
+            hidden_size=data.get("hidden_size"),
+            num_layers=data.get("num_layers"),
+            vocab_size=data.get("vocab_size"),
             installed_at=installed_at,
             last_used=last_used,
             metrics=metrics,
-            status=ModelStatus(data.get("status", "healthy"))
+            status=ModelStatus(data.get("status", "healthy")),
         )
+
 
 @dataclass(slots=True)
 class CloudModel:
@@ -152,12 +183,16 @@ class CloudModel:
             "source": self.source.value,
             "context_length": self.context_length,
             "capabilities": self.capabilities,
+            "hidden_size": self.hidden_size,
+            "num_layers": self.num_layers,
+            "vocab_size": self.vocab_size,
+            "estimated_kv_cache_gb": round(self.estimated_kv_cache_gb, 2),
             "cost_per_million_tokens": self.cost_per_million_tokens,
             "quota_risk": self.quota_risk,
             "requires_opt_in": self.requires_opt_in,
             "is_default_excluded": self.is_default_excluded,
             "latency_p50_ms": self.latency_p50_ms,
-            "quality_score": self.quality_score
+            "quality_score": self.quality_score,
         }
 
     @classmethod
@@ -171,13 +206,17 @@ class CloudModel:
             source=ModelSource(data.get("source", "cloud")),
             context_length=data.get("context_length", 128000),
             capabilities=data.get("capabilities", []),
+            hidden_size=data.get("hidden_size"),
+            num_layers=data.get("num_layers"),
+            vocab_size=data.get("vocab_size"),
             cost_per_million_tokens=data.get("cost_per_million_tokens", 0.0),
             quota_risk=data.get("quota_risk", 0.0),
             requires_opt_in=data.get("requires_opt_in", False),
             is_default_excluded=data.get("is_default_excluded", False),
             latency_p50_ms=data.get("latency_p50_ms"),
-            quality_score=data.get("quality_score")
+            quality_score=data.get("quality_score"),
         )
+
 
 @dataclass(slots=True)
 class CatalogState:
@@ -195,7 +234,7 @@ class CatalogState:
             "local_models": {k: v.to_dict() for k, v in self.local_models.items()},
             "cloud_models": {k: v.to_dict() for k, v in self.cloud_models.items()},
             "last_local_sync": self.last_local_sync.isoformat() if self.last_local_sync else None,
-            "last_cloud_sync": self.last_cloud_sync.isoformat() if self.last_cloud_sync else None
+            "last_cloud_sync": self.last_cloud_sync.isoformat() if self.last_cloud_sync else None,
         }
 
     @classmethod
@@ -209,5 +248,5 @@ class CatalogState:
             local_models=local_models,
             cloud_models=cloud_models,
             last_local_sync=datetime.fromisoformat(data["last_local_sync"]) if data.get("last_local_sync") else None,
-            last_cloud_sync=datetime.fromisoformat(data["last_cloud_sync"]) if data.get("last_cloud_sync") else None
+            last_cloud_sync=datetime.fromisoformat(data["last_cloud_sync"]) if data.get("last_cloud_sync") else None,
         )

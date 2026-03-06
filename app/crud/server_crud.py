@@ -35,7 +35,7 @@ def _is_safe_url(url: str) -> bool:
     try:
         parsed = urlparse(str(url))
         # Ensure only http/https schemes are used
-        if parsed.scheme not in ('http', 'https'):
+        if parsed.scheme not in ("http", "https"):
             return False
 
         # Ensure there is a valid hostname/netloc
@@ -44,7 +44,7 @@ def _is_safe_url(url: str) -> bool:
             return False
 
         # Block localhost specifically
-        if hostname.lower() in ('localhost', 'localhost.localdomain'):
+        if hostname.lower() in ("localhost", "localhost.localdomain"):
             return False
 
         # Resolve hostname to check IPs
@@ -111,16 +111,11 @@ async def create_server(db: AsyncSession, server: ServerCreate) -> OllamaServer:
         raise ValueError("Server name must be 1-128 characters")
 
     # Validate server_type
-    if server.server_type not in ('ollama', 'vllm'):
+    if server.server_type not in ("ollama", "vllm"):
         raise ValueError("Server type must be 'ollama' or 'vllm'")
 
     encrypted_key = encrypt_data(server.api_key) if server.api_key else None
-    db_server = OllamaServer(
-        name=server.name,
-        url=str(server.url),
-        server_type=server.server_type,
-        encrypted_api_key=encrypted_key
-    )
+    db_server = OllamaServer(name=server.name, url=str(server.url), server_type=server.server_type, encrypted_api_key=encrypted_key)
     db.add(db_server)
     await db.commit()
     await db.refresh(db_server)
@@ -144,16 +139,16 @@ async def update_server(db: AsyncSession, server_id: int, server_update: ServerU
     for key, value in update_data.items():
         if value is not None:
             # Validate URL on update
-            if key == 'url':
+            if key == "url":
                 if not _is_safe_url(str(value)):
                     raise ValueError(f"URL {value} is not allowed for security reasons")
                 setattr(db_server, key, str(value))
-            elif key == 'name':
+            elif key == "name":
                 if not value or len(value) > 128:
                     raise ValueError("Server name must be 1-128 characters")
                 setattr(db_server, key, value)
-            elif key == 'server_type':
-                if value not in ('ollama', 'vllm'):
+            elif key == "server_type":
+                if value not in ("ollama", "vllm"):
                     raise ValueError("Server type must be 'ollama' or 'vllm'")
                 setattr(db_server, key, value)
             else:
@@ -215,27 +210,27 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                     if not model_id or not isinstance(model_id, str):
                         continue
                     # Sanitize model_id
-                    model_id = re.sub(r'[^\w\.\-:/]', '', model_id)[:256]
+                    model_id = re.sub(r"[^\w\.\-:/]", "", model_id)[:256]
 
-                    family = model_id.split(':')[0].split('-')[0] if ':' in model_id else model_id.split('-')[0]
-                    family = re.sub(r'[^\w\.\-]', '', family)[:64]
+                    family = model_id.split(":")[0].split("-")[0] if ":" in model_id else model_id.split("-")[0]
+                    family = re.sub(r"[^\w\.\-]", "", family)[:64]
 
-                    models.append({
-                        "name": model_id,
-                        "size": 0,  # Not available from vLLM API
-                        "modified_at": datetime.datetime.fromtimestamp(
-                            model.get("created", 0), tz=datetime.timezone.utc
-                        ).isoformat(),
-                        "digest": model_id, # Use ID as a stand-in for digest
-                        "details": {
-                            "parent_model": "",
-                            "format": "vllm",
-                            "family": family,
-                            "families": [family] if family else None,
-                            "parameter_size": "N/A",
-                            "quantization_level": "N/A"
+                    models.append(
+                        {
+                            "name": model_id,
+                            "size": 0,  # Not available from vLLM API
+                            "modified_at": datetime.datetime.fromtimestamp(model.get("created", 0), tz=datetime.timezone.utc).isoformat(),
+                            "digest": model_id,  # Use ID as a stand-in for digest
+                            "details": {
+                                "parent_model": "",
+                                "format": "vllm",
+                                "family": family,
+                                "families": [family] if family else None,
+                                "parameter_size": "N/A",
+                                "quantization_level": "N/A",
+                            },
                         }
-                    })
+                    )
             else:  # Default to "ollama"
                 endpoint_url = f"{server.url.rstrip('/')}/api/tags"
                 response = await client.get(endpoint_url)
@@ -251,7 +246,7 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                     if not name or not isinstance(name, str):
                         continue
                     # Sanitize model name
-                    name = re.sub(r'[^\w\.\-:@]', '', name)[:256]
+                    name = re.sub(r"[^\w\.\-:@]", "", name)[:256]
 
                     # Sanitize other fields
                     size = model.get("size", 0)
@@ -268,7 +263,7 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                     digest = model.get("digest", "")
                     if not isinstance(digest, str):
                         digest = ""
-                    digest = re.sub(r'[^\w:]', '', digest)[:128]
+                    digest = re.sub(r"[^\w:]", "", digest)[:128]
 
                     # Sanitize details
                     details = model.get("details", {})
@@ -286,8 +281,8 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
                             "family": str(details.get("family", ""))[:64],
                             "families": None,
                             "parameter_size": str(details.get("parameter_size", ""))[:32],
-                            "quantization_level": str(details.get("quantization_level", ""))[:32]
-                        }
+                            "quantization_level": str(details.get("quantization_level", ""))[:32],
+                        },
                     }
                     if details.get("families") and isinstance(details["families"], list):
                         safe_families = [str(f)[:64] for f in details["families"] if isinstance(f, str)]
@@ -327,7 +322,7 @@ async def fetch_and_update_models(db: AsyncSession, server_id: int) -> dict:
 
 async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
     """Pulls a model on a specific Ollama server."""
-    if server.server_type == 'vllm':
+    if server.server_type == "vllm":
         return {"success": False, "message": "Pulling models is not supported for vLLM servers."}
 
     # Validate model name
@@ -335,7 +330,7 @@ async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
         return {"success": False, "message": "Invalid model name"}
 
     # Sanitize model name
-    if not re.match(r'^[\w\.\-:@]+$', model_name):
+    if not re.match(r"^[\w\.\-:@]+$", model_name):
         return {"success": False, "message": "Model name contains invalid characters"}
 
     headers = _get_auth_headers(server)
@@ -348,11 +343,7 @@ async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
             # Check for immediate errors
             if response.status_code >= 400:
                 error_text = await response.aread()
-                raise httpx.HTTPStatusError(
-                    f"Pull failed with status {response.status_code}",
-                    request=response.request,
-                    response=response
-                )
+                raise httpx.HTTPStatusError(f"Pull failed with status {response.status_code}", request=response.request, response=response)
 
             async for chunk in response.aiter_text():
                 try:
@@ -360,7 +351,7 @@ async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
                     # You could process status updates here if needed in the future
                     logger.debug(f"Pull status for {model_name} on {server.name}: {line.get('status')}")
                 except json.JSONDecodeError:
-                    continue # Ignore non-json chunks
+                    continue  # Ignore non-json chunks
 
         logger.info(f"Successfully pulled/updated model '{model_name}' on server '{server.name}'")
         return {"success": True, "message": f"Model '{model_name}' pulled/updated successfully."}
@@ -377,7 +368,7 @@ async def pull_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
 
 async def delete_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
     """Deletes a model from a specific Ollama server."""
-    if server.server_type == 'vllm':
+    if server.server_type == "vllm":
         return {"success": False, "message": "Deleting models is not supported for vLLM servers."}
 
     # Validate model name
@@ -385,7 +376,7 @@ async def delete_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
         return {"success": False, "message": "Invalid model name"}
 
     # Sanitize model name
-    if not re.match(r'^[\w\.\-:@]+$', model_name):
+    if not re.match(r"^[\w\.\-:@]+$", model_name):
         return {"success": False, "message": "Model name contains invalid characters"}
 
     headers = _get_auth_headers(server)
@@ -402,7 +393,7 @@ async def delete_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
         if e.response.status_code == 404:
             message = f"Model '{model_name}' not found on server."
             logger.warning(message)
-            return {"success": True, "message": message} # Treat not found as a success
+            return {"success": True, "message": message}  # Treat not found as a success
         error_msg = f"Failed to delete model '{model_name}': Server returned status {e.response.status_code}"[:512]
         logger.error(f"{error_msg} on server '{server.name}'")
         return {"success": False, "message": error_msg}
@@ -414,7 +405,7 @@ async def delete_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
 
 async def load_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
     """Sends a dummy request to a server to load a model into memory."""
-    if server.server_type == 'vllm':
+    if server.server_type == "vllm":
         return {"success": False, "message": "Explicit model loading is not applicable for vLLM servers."}
 
     # Validate model name
@@ -422,7 +413,7 @@ async def load_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
         return {"success": False, "message": "Invalid model name"}
 
     # Sanitize model name
-    if not re.match(r'^[\w\.\-:@]+$', model_name):
+    if not re.match(r"^[\w\.\-:@]+$", model_name):
         return {"success": False, "message": "Model name contains invalid characters"}
 
     headers = _get_auth_headers(server)
@@ -436,7 +427,7 @@ async def load_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
         return {"success": True, "message": f"Model '{model_name}' is being loaded into memory."}
     except httpx.HTTPStatusError as e:
         try:
-            error_detail = e.response.json().get('error', e.response.text)
+            error_detail = e.response.json().get("error", e.response.text)
         except json.JSONDecodeError:
             error_detail = e.response.text
         error_msg = f"Failed to load model '{model_name}': Server returned status {e.response.status_code}: {error_detail}"[:512]
@@ -450,7 +441,7 @@ async def load_model_on_server(http_client: httpx.AsyncClient, server: OllamaSer
 
 async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaServer, model_name: str) -> dict:
     """Sends a request to a server to unload a model from memory."""
-    if server.server_type == 'vllm':
+    if server.server_type == "vllm":
         return {"success": False, "message": "Explicit model unloading is not applicable for vLLM servers."}
 
     # Validate model name
@@ -458,7 +449,7 @@ async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
         return {"success": False, "message": "Invalid model name"}
 
     # Sanitize model name
-    if not re.match(r'^[\w\.\-:@]+$', model_name):
+    if not re.match(r"^[\w\.\-:@]+$", model_name):
         return {"success": False, "message": "Model name contains invalid characters"}
 
     headers = _get_auth_headers(server)
@@ -473,9 +464,9 @@ async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
     except httpx.HTTPStatusError as e:
         # If the model isn't found (which can happen if it's not loaded), treat as success.
         if e.response.status_code == 404:
-             return {"success": True, "message": f"Model '{model_name}' was not loaded in memory."}
+            return {"success": True, "message": f"Model '{model_name}' was not loaded in memory."}
         try:
-            error_detail = e.response.json().get('error', e.response.text)
+            error_detail = e.response.json().get("error", e.response.text)
         except json.JSONDecodeError:
             error_detail = e.response.text
         error_msg = f"Failed to unload model '{model_name}': Server returned status {e.response.status_code}: {error_detail}"[:512]
@@ -487,21 +478,22 @@ async def unload_model_on_server(http_client: httpx.AsyncClient, server: OllamaS
         return {"success": False, "message": error_msg}
 
 
-async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[OllamaServer]:
+async def get_servers_with_model(db: AsyncSession, model_name: str, prefer_high_throughput: bool = True) -> list[OllamaServer]:
     """
     Get all active servers that have the specified model available, using flexible matching.
+    If prefer_high_throughput is True (default for production), vLLM servers are weighted higher.
     """
     # Validate model name
     if not model_name or len(model_name) > 256:
         return []
 
     # Sanitize model name for safety
-    model_name = re.sub(r'[^\w\.\-:@]', '', model_name)[:256]
+    model_name = re.sub(r"[^\w\.\-:@]", "", model_name)[:256]
 
     servers = await get_servers(db)
     active_servers = [s for s in servers if s.is_active]
 
-    servers_with_model = []
+    candidates = []
     for server in active_servers:
         if server.available_models:
             # Validate available_models is a list
@@ -518,19 +510,34 @@ async def get_servers_with_model(db: AsyncSession, model_name: str) -> list[Olla
             for model_data in models_list:
                 if isinstance(model_data, dict) and "name" in model_data:
                     available_model_name = model_data["name"]
-                    if not isinstance(available_model_name, str):
-                        continue
+                    if _model_matches(available_model_name, model_name):
+                        weight = 2.0 if server.server_type == "vllm" and prefer_high_throughput else 1.0
+                        candidates.append((server, weight))
+                        break
 
-                    # Flexible matching:
-                    # 1. Exact match (e.g., "llama3:8b" == "llama3:8b")
-                    # 2. Prefix match (e.g., "llama3" matches "llama3:8b")
-                    # 3. Substring match for vLLM (e.g., "Llama-2-7b" matches "models--meta-llama--Llama-2-7b-chat-hf")
-                    if (available_model_name == model_name or
-                        available_model_name.startswith(f"{model_name}:") or
-                        (server.server_type == 'vllm' and model_name in available_model_name)):
-                        servers_with_model.append(server)
-                        break  # Found on this server, move to the next
-    return servers_with_model
+    if not candidates:
+        # Fallback logic: check if it's an OpenRouter or Cloud model
+        if "openrouter" in model_name.lower():
+            dummy_server = OllamaServer(
+                name="OpenRouter API",
+                url="https://openrouter.ai",
+                server_type="openrouter",
+                is_active=True
+            )
+            return [dummy_server]
+        elif "ollama-cloud" in model_name.lower():
+            dummy_server = OllamaServer(
+                name="Ollama Cloud API",
+                url="https://api.ollama.cloud",
+                server_type="ollama_cloud",
+                is_active=True
+            )
+            return [dummy_server]
+        return []
+
+    # Sort by weight (vLLM first), then by last_used/id for deterministic round-robin fallback
+    candidates.sort(key=lambda x: (-x[1], getattr(x[0], "models_last_updated", 0) or 0))
+    return [s[0] for s in candidates]
 
 
 def is_embedding_model(model_name: str) -> bool:
@@ -546,7 +553,7 @@ async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[
     Can be filtered by type ('chat' or 'embedding').
     """
     # Validate filter_type
-    if filter_type not in (None, 'chat', 'embedding'):
+    if filter_type not in (None, "chat", "embedding"):
         filter_type = None
 
     servers = await get_servers(db)
@@ -579,9 +586,9 @@ async def get_all_available_model_names(db: AsyncSession, filter_type: Optional[
 
                 is_embed = is_embedding_model(model_name)
 
-                if filter_type == 'embedding' and is_embed:
+                if filter_type == "embedding" and is_embed:
                     all_models.add(model_name)
-                elif filter_type == 'chat' and not is_embed:
+                elif filter_type == "chat" and not is_embed:
                     all_models.add(model_name)
                 elif filter_type is None:
                     all_models.add(model_name)
@@ -598,7 +605,7 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
     Gets all available model names, grouped by their server, and includes proxy-native models.
     """
     # Validate filter_type
-    if filter_type not in (None, 'chat', 'embedding'):
+    if filter_type not in (None, "chat", "embedding"):
         filter_type = None
 
     servers = await get_servers(db)
@@ -631,9 +638,9 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
                     is_embed = is_embedding_model(model_name)
 
                     should_add = False
-                    if filter_type == 'embedding' and is_embed:
+                    if filter_type == "embedding" and is_embed:
                         should_add = True
-                    elif filter_type == 'chat' and not is_embed:
+                    elif filter_type == "chat" and not is_embed:
                         should_add = True
                     elif filter_type is None:
                         should_add = True
@@ -652,7 +659,7 @@ async def get_all_models_grouped_by_server(db: AsyncSession, filter_type: Option
 
     # Create a new dictionary to control order and add proxy-native models like 'auto'
     final_grouped_models = {}
-    if filter_type == 'chat' or filter_type is None:
+    if filter_type == "chat" or filter_type is None:
         final_grouped_models["Proxy Features"] = ["auto"]
 
     # Merge the server-specific models after the proxy features
@@ -669,13 +676,14 @@ async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.Asy
     servers = await get_servers(db)
     active_servers = [s for s in servers if s.is_active]
 
-    ollama_servers = [s for s in active_servers if s.server_type == 'ollama']
-    vllm_servers = [s for s in active_servers if s.server_type == 'vllm']
+    ollama_servers = [s for s in active_servers if s.server_type == "ollama"]
+    vllm_servers = [s for s in active_servers if s.server_type == "vllm"]
 
     all_models = []
 
     # 1. Fetch actively running models from Ollama servers
     if ollama_servers:
+
         async def fetch_ps(server: OllamaServer):
             try:
                 # Security check
@@ -717,13 +725,15 @@ async def get_active_models_all_servers(db: AsyncSession, http_client: httpx.Asy
         if server.available_models and isinstance(server.available_models, list):
             for model_info in server.available_models[:100]:  # Limit to prevent DoS
                 if isinstance(model_info, dict):
-                    all_models.append({
-                        "name": str(model_info.get("name", ""))[:256],
-                        "server_name": server.name[:128],
-                        "size": int(model_info.get("size", 0)) if str(model_info.get("size", "")).isdigit() else 0,
-                        "size_vram": 1,  # Assume GPU placement for vLLM
-                        "expires_at": "N/A (Always Active)",
-                    })
+                    all_models.append(
+                        {
+                            "name": str(model_info.get("name", ""))[:256],
+                            "server_name": server.name[:128],
+                            "size": int(model_info.get("size", 0)) if str(model_info.get("size", "")).isdigit() else 0,
+                            "size_vram": 1,  # Assume GPU placement for vLLM
+                            "expires_at": "N/A (Always Active)",
+                        }
+                    )
 
     # Limit total
     if len(all_models) > 10000:
@@ -744,12 +754,7 @@ async def refresh_all_server_models(db: AsyncSession) -> dict:
     active_servers = [(s.id, s.name, s.is_active) for s in servers]
     active_servers = [(sid, sname) for sid, sname, is_active in active_servers if is_active]
 
-    results = {
-        "total": len(active_servers),
-        "success": 0,
-        "failed": 0,
-        "errors": []
-    }
+    results = {"total": len(active_servers), "success": 0, "failed": 0, "errors": []}
 
     for server_id, server_name in active_servers:
         result = await fetch_and_update_models(db, server_id)
@@ -757,11 +762,7 @@ async def refresh_all_server_models(db: AsyncSession) -> dict:
             results["success"] += 1
         else:
             results["failed"] += 1
-            results["errors"].append({
-                "server_id": server_id,
-                "server_name": server_name,
-                "error": result["error"][:512] if result["error"] else "Unknown error"
-            })
+            results["errors"].append({"server_id": server_id, "server_name": server_name, "error": result["error"][:512] if result["error"] else "Unknown error"})
 
     return results
 
@@ -774,10 +775,10 @@ async def check_server_health(http_client: httpx.AsyncClient, server: OllamaServ
 
     headers = _get_auth_headers(server)
     try:
-        ping_url = server.url.rstrip('/')
+        ping_url = server.url.rstrip("/")
         # vLLM servers have a /health endpoint, Ollama root is enough
-        if server.server_type == 'vllm':
-            ping_url += '/health'
+        if server.server_type == "vllm":
+            ping_url += "/health"
 
         response = await http_client.get(ping_url, timeout=5.0, headers=headers)
 

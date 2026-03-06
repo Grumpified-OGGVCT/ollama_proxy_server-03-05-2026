@@ -4,6 +4,7 @@ Main entry point for the Ollama Proxy Server.
 This version removes Alembic and uses SQLAlchemy's create_all
 to initialize the database on startup.
 """
+
 import logging
 import os
 import sys
@@ -17,13 +18,12 @@ BaseModel.model_config = ConfigDict(protected_namespaces=())
 import httpx
 import redis.asyncio as redis
 from contextlib import asynccontextmanager
-import json
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import RedirectResponse
 
 from app.core.config import settings
 from app.core.logging_config import setup_logging
@@ -37,7 +37,6 @@ from app.database.base import Base
 from app.database.migrations import run_all_migrations
 from app.crud import user_crud, server_crud, settings_crud
 from app.schema.user import UserCreate
-from app.schema.server import ServerCreate
 from app.routes.catalog_routes import router as catalog_router
 from app.middleware.security import add_security_headers_middleware
 from app.schema.settings import AppSettingsModel
@@ -48,6 +47,8 @@ logger = logging.getLogger(__name__)
 os.environ.setdefault("PASSLIB_DISABLE_WARNINGS", "1")
 
 _db_initialized = False
+
+
 async def init_db():
     """
     Creates all database tables based on the SQLAlchemy models.
@@ -67,11 +68,13 @@ async def init_db():
     # Then create any missing tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
     _db_initialized = True
     logger.info("Database schema is ready.")
 
+
 from sqlalchemy.exc import IntegrityError
+
 
 async def create_initial_admin_user() -> None:
     async with AsyncSessionLocal() as db:
@@ -87,19 +90,20 @@ async def create_initial_admin_user() -> None:
         except IntegrityError:
             logger.info("Admin user was created concurrently by another worker.")
 
+
 async def periodic_model_refresh(app: FastAPI) -> None:
     """
     Background task that periodically refreshes model lists for all servers.
     """
     import asyncio
-    
+
     while True:
         try:
             # Fetch the interval from app state so it can be updated live
             app_settings: AppSettingsModel = app.state.settings
             interval_minutes = app_settings.model_update_interval_minutes
             interval_seconds = interval_minutes * 60
-            
+
             logger.info(f"Next model refresh in {interval_minutes} minutes.")
             await asyncio.sleep(interval_seconds)
 
@@ -107,13 +111,11 @@ async def periodic_model_refresh(app: FastAPI) -> None:
             async with AsyncSessionLocal() as db:
                 results = await server_crud.refresh_all_server_models(db)
 
-            logger.info(
-                f"Model refresh completed: {results['success']}/{results['total']} servers updated successfully"
-            )
+            logger.info(f"Model refresh completed: {results['success']}/{results['total']} servers updated successfully")
 
-            if results['failed'] > 0:
+            if results["failed"] > 0:
                 logger.warning(f"{results['failed']} server(s) failed to update:")
-                for error in results['errors']:
+                for error in results["errors"]:
                     logger.warning(f"  - {error['server_name']}: {error['error']}")
 
         except asyncio.CancelledError:
@@ -127,12 +129,12 @@ async def periodic_model_refresh(app: FastAPI) -> None:
 async def lifespan(app: FastAPI):
     # ---------- Startup ----------
     logger.info("Starting up Ollama Proxy Server…")
-    
+
     # Ensure directories exist
     uploads_dir = Path("app/static/uploads")
     uploads_dir.mkdir(exist_ok=True)
     logger.info(f"Uploads directory is at: {uploads_dir.resolve()}")
-    
+
     ssl_dir = Path(".ssl")
     ssl_dir.mkdir(exist_ok=True)
     logger.info(f"SSL storage directory is at: {ssl_dir.resolve()}")
@@ -147,7 +149,7 @@ async def lifespan(app: FastAPI):
         sys.exit(1)
 
     await init_db()
-    
+
     # --- NEW: Load settings from DB ---
     async with AsyncSessionLocal() as db:
         db_settings_obj = await settings_crud.create_initial_settings(db)
@@ -178,6 +180,7 @@ async def lifespan(app: FastAPI):
         app.state.redis = None
 
     import asyncio
+
     refresh_task = asyncio.create_task(periodic_model_refresh(app))
     app.state.refresh_task = refresh_task
 
@@ -191,7 +194,7 @@ async def lifespan(app: FastAPI):
 
     # ---------- Shutdown ----------
     logger.info("Shutting down…")
-    if hasattr(app.state, 'refresh_task'):
+    if hasattr(app.state, "refresh_task"):
         app.state.refresh_task.cancel()
         try:
             await app.state.refresh_task
@@ -201,6 +204,7 @@ async def lifespan(app: FastAPI):
     await app.state.http_client.aclose()
     if app.state.redis:
         await app.state.redis.close()
+
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -212,6 +216,7 @@ app = FastAPI(
 )
 
 app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
+
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
@@ -232,6 +237,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Content-Security-Policy"] = csp_policy
     return response
 
+
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(health_router, prefix="/api/v1", tags=["Health"])
 app.include_router(proxy_router, prefix="/api", tags=["Ollama Proxy"])
@@ -241,9 +247,11 @@ add_security_headers_middleware(app)
 app.include_router(playground_chat_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 app.include_router(playground_embedding_router, prefix="/admin", tags=["Admin UI"], include_in_schema=False)
 
+
 @app.get("/", include_in_schema=False, summary="Root")
 def read_root():
     return RedirectResponse(url="/admin/dashboard")
+
 
 if __name__ == "__main__":
     import uvicorn
@@ -256,7 +264,7 @@ if __name__ == "__main__":
         port = settings.PROXY_PORT
         ssl_keyfile = None
         ssl_certfile = None
-        
+
         try:
             # Run init_db once to ensure DB exists for reading SSL settings.
             await init_db()
@@ -267,11 +275,11 @@ if __name__ == "__main__":
 
                 if db_settings_obj:
                     app_settings = AppSettingsModel.model_validate(db_settings_obj.settings_data)
-                    
+
                     if app_settings.ssl_keyfile and app_settings.ssl_certfile:
                         key_path = Path(app_settings.ssl_keyfile)
                         cert_path = Path(app_settings.ssl_certfile)
-                        
+
                         if key_path.is_file() and cert_path.is_file():
                             ssl_keyfile = str(key_path)
                             ssl_certfile = str(cert_path)
@@ -281,16 +289,16 @@ if __name__ == "__main__":
                             if not cert_path.is_file():
                                 logger.warning(f"SSL cert file not found at '{cert_path}'. Starting without HTTPS.")
         except Exception as e:
-                logger.info(f"Could not load SSL settings from DB (this is normal on first run). Reason: {e}")
+            logger.info(f"Could not load SSL settings from DB (this is normal on first run). Reason: {e}")
 
         # --- User-friendly startup banner ---
         protocol = "https" if ssl_keyfile and ssl_certfile else "http"
-        
+
         # This function will be called after Uvicorn starts up
         def after_start():
-            print("\n" + "="*60)
+            print("\n" + "=" * 60)
             print("🚀 Ollama Proxy Fortress is running! 🚀")
-            print("="*60)
+            print("=" * 60)
             print(f"✅ Version: {settings.APP_VERSION}")
             print(f"✅ Mode: {'Production (HTTPS)' if protocol == 'https' else 'Development (HTTP)'}")
             print(f"✅ Listening on port: {port}")
@@ -298,9 +306,8 @@ if __name__ == "__main__":
             print(f"    {protocol}://127.0.0.1:{port}/admin/dashboard")
             print(f"    or {protocol}://localhost:{port}/admin/dashboard")
             print("\nTo stop the server, press CTRL+C in this window.")
-            print("="*60 + "\n")
+            print("=" * 60 + "\n")
             print("Note: Log messages from 'uvicorn.error' are for general server events and do not necessarily indicate an error.\n")
-
 
         # Correct way to run uvicorn programmatically
         config = uvicorn.Config(
@@ -309,15 +316,17 @@ if __name__ == "__main__":
             port=port,
             ssl_keyfile=ssl_keyfile,
             ssl_certfile=ssl_certfile,
-            log_config=None, # Let our custom logging handle it
+            log_config=None,  # Let our custom logging handle it
         )
         server = uvicorn.Server(config)
-        
+
         # A bit of a workaround to print banner after Uvicorn's own startup messages
         original_startup = server.startup
+
         async def new_startup(*args, **kwargs):
             await original_startup(*args, **kwargs)
             after_start()
+
         server.startup = new_startup
 
         await server.serve()
