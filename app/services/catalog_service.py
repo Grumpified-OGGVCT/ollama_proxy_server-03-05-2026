@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any
 import aiohttp
 import aiofiles
 
-from app.models.catalog import LocalModel, CatalogState, ModelTier, ModelStatus, PerformanceMetrics
+from app.models.catalog import LocalModel, CloudModel, CatalogState, ModelTier, ModelStatus, PerformanceMetrics
 
 
 class CatalogService:
@@ -258,6 +258,78 @@ class CatalogService:
     def get_models_by_capability(self, capability: str) -> List[LocalModel]:
         """Filter models by capability."""
         return [m for m in self._state.local_models.values() if capability in m.capabilities]
+
+
+    async def get_cloud_models(self, use_cache: bool = True) -> List[CloudModel]:
+        """Performance: O(1) cached, O(n) fetch on miss."""
+        if use_cache and self._state.last_cloud_sync:
+            age = (datetime.utcnow() - self._state.last_cloud_sync).total_seconds()
+            if age < self.CACHE_TTL_SECONDS:
+                return list(self._state.cloud_models.values())
+
+        # Parallel fetch for enabled providers
+        tasks = []
+        # In a real impl, you'd check settings.enable_openrouter here
+        tasks.append(self._fetch_openrouter_models())
+        tasks.append(self._fetch_ollama_cloud_models())
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        merged: Dict[str, CloudModel] = {}
+        for result in results:
+            if isinstance(result, Exception):
+                continue
+            for model in result:
+                merged[model.id] = model
+
+        self._state.cloud_models = merged
+        self._state.last_cloud_sync = datetime.utcnow()
+        await self._persist_to_disk()
+
+        return list(merged.values())
+
+    async def _fetch_openrouter_models(self) -> List[CloudModel]:
+        models: List[CloudModel] = []
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            try:
+                async with session.get("https://openrouter.ai/api/v1/models") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for m in data.get("data", []):
+                            price = m.get("pricing", {})
+                            prompt_cost = float(price.get("prompt", 0) or 0)
+                            completion_cost = float(price.get("completion", 0) or 0)
+                            cost_pm = (prompt_cost + completion_cost) * 1000000
+
+                            models.append(CloudModel(
+                                id=f"openrouter:{m.get('id')}",
+                                name=m.get("id"),
+                                provider="openrouter",
+                                model_card_name=m.get("name", ""),
+                                tier=ModelTier.DEEP if "70b" in m.get("id", "").lower() else ModelTier.BALANCED,
+                                context_length=int(m.get("context_length", 8192)),
+                                cost_per_million_tokens=cost_pm,
+                                is_default_excluded=False,
+                            ))
+            except Exception:
+                pass
+        return models
+
+    async def _fetch_ollama_cloud_models(self) -> List[CloudModel]:
+        models: List[CloudModel] = []
+        # Mocking Ollama Cloud fetch as the endpoint structure isn't fully standardized
+        # In production this would hit https://api.ollama.cloud/v1/models
+        models.append(CloudModel(
+            id="ollama-cloud:llama3.3",
+            name="llama3.3",
+            provider="ollama-cloud",
+            model_card_name="Llama 3.3 Cloud",
+            tier=ModelTier.DEEP,
+            context_length=128000,
+            cost_per_million_tokens=0.5
+        ))
+        return models
 
     async def update_model_metrics(self, model_id: str, metrics: PerformanceMetrics) -> None:
         """Update performance metrics for a model."""

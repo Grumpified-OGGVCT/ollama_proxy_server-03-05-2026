@@ -516,6 +516,23 @@ async def get_servers_with_model(db: AsyncSession, model_name: str, prefer_high_
                         break
 
     if not candidates:
+        # Fallback logic: check if it's an OpenRouter or Cloud model
+        if "openrouter" in model_name.lower():
+            dummy_server = OllamaServer(
+                name="OpenRouter API",
+                url="https://openrouter.ai",
+                server_type="openrouter",
+                is_active=True
+            )
+            return [dummy_server]
+        elif "ollama-cloud" in model_name.lower():
+            dummy_server = OllamaServer(
+                name="Ollama Cloud API",
+                url="https://api.ollama.cloud",
+                server_type="ollama_cloud",
+                is_active=True
+            )
+            return [dummy_server]
         return []
 
     # Sort by weight (vLLM first), then by last_used/id for deterministic round-robin fallback

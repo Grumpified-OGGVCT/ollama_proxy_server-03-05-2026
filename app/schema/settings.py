@@ -69,6 +69,13 @@ class AppSettingsModel(BaseModel):
     halt_on_verification_failure: bool = Field(default=True)
 
     # Patch 7: Max Pull Size
+    # Cloud Providers Configuration
+    enable_openrouter: bool = Field(default=True)
+    openrouter_api_key: str = Field(default="")
+    prefer_openrouter_free_models: bool = Field(default=True)
+    enable_ollama_cloud: bool = Field(default=True)
+    ollama_cloud_api_key: str = Field(default="")
+
     # Part 3: God-Tier Optimizations
     enable_semantic_cache: bool = Field(default=True)
     semantic_cache_threshold: float = Field(default=0.98)
