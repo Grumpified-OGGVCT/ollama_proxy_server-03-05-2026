@@ -17,10 +17,10 @@ T = TypeVar("T")
 class RetryConfig:
     """Configuration for retry behavior."""
 
-    max_retries: int = 2  # REDUCED from 5 to 2 for faster failover
-    total_timeout_seconds: float = 1.0  # REDUCED from 2.0 to 1.0
+    max_retries: int = 5  # Resilient default to tolerate transient backend stalls
+    total_timeout_seconds: float = 2.0  # Standard timeout budget for non-loading operations
     loading_timeout_seconds: float = 15.0  # Extended timeout for cold model loads
-    base_delay_ms: int = 10  # REDUCED from 50 to 10 for faster retries
+    base_delay_ms: int = 50  # Balanced backoff step to prevent thundering herd retries
 
     def __post_init__(self):
         """Validate configuration."""
