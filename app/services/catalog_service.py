@@ -259,7 +259,6 @@ class CatalogService:
         """Filter models by capability."""
         return [m for m in self._state.local_models.values() if capability in m.capabilities]
 
-
     async def get_cloud_models(self, use_cache: bool = True) -> List[CloudModel]:
         """Performance: O(1) cached, O(n) fetch on miss."""
         if use_cache and self._state.last_cloud_sync:
@@ -302,16 +301,18 @@ class CatalogService:
                             completion_cost = float(price.get("completion", 0) or 0)
                             cost_pm = (prompt_cost + completion_cost) * 1000000
 
-                            models.append(CloudModel(
-                                id=f"openrouter:{m.get('id')}",
-                                name=m.get("id"),
-                                provider="openrouter",
-                                model_card_name=m.get("name", ""),
-                                tier=ModelTier.DEEP if "70b" in m.get("id", "").lower() else ModelTier.BALANCED,
-                                context_length=int(m.get("context_length", 8192)),
-                                cost_per_million_tokens=cost_pm,
-                                is_default_excluded=False,
-                            ))
+                            models.append(
+                                CloudModel(
+                                    id=f"openrouter:{m.get('id')}",
+                                    name=m.get("id"),
+                                    provider="openrouter",
+                                    model_card_name=m.get("name", ""),
+                                    tier=ModelTier.DEEP if "70b" in m.get("id", "").lower() else ModelTier.BALANCED,
+                                    context_length=int(m.get("context_length", 8192)),
+                                    cost_per_million_tokens=cost_pm,
+                                    is_default_excluded=False,
+                                )
+                            )
             except Exception:
                 pass
         return models
@@ -320,15 +321,17 @@ class CatalogService:
         models: List[CloudModel] = []
         # Mocking Ollama Cloud fetch as the endpoint structure isn't fully standardized
         # In production this would hit https://api.ollama.cloud/v1/models
-        models.append(CloudModel(
-            id="ollama-cloud:llama3.3",
-            name="llama3.3",
-            provider="ollama-cloud",
-            model_card_name="Llama 3.3 Cloud",
-            tier=ModelTier.DEEP,
-            context_length=128000,
-            cost_per_million_tokens=0.5
-        ))
+        models.append(
+            CloudModel(
+                id="ollama-cloud:llama3.3",
+                name="llama3.3",
+                provider="ollama-cloud",
+                model_card_name="Llama 3.3 Cloud",
+                tier=ModelTier.DEEP,
+                context_length=128000,
+                cost_per_million_tokens=0.5,
+            )
+        )
         return models
 
     async def update_model_metrics(self, model_id: str, metrics: PerformanceMetrics) -> None:

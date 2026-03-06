@@ -18,3 +18,10 @@ Context: Added predictive models and optimization architectures.
 Learning: Memory mapping and O(1) context constraints allow predictable performance regardless of session sizes.
 Evidence: OOM (Out Of Memory) crashes and slowdowns on long-running contexts prevented.
 Action: Implemented HTTP pooling, memory mapping, and adaptive batching.
+
+YYYY-MM-DD - 2026-03-06
+Title: Architectural Enums Documentation
+Context: Explicit mapping of Cloud targets inside Catalog objects.
+Learning: Python Enum classes required hard-coding to override default 'Local/Cloud' fallbacks to properly target OpenRouter and specific Cloud API variations natively.
+Evidence: OpenRouter keys failed to trigger until generic `source=ModelSource.CLOUD` was patched to `source=ModelSource.OPENROUTER`.
+Action: Modified explicit Matrix values matching settings mappings.

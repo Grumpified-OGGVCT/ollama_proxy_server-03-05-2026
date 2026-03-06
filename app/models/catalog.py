@@ -13,6 +13,11 @@ class ModelTier(Enum):
 
 
 class ModelSource(Enum):
+    OLLAMA_LOCAL = "ollama_local"
+    OLLAMA_CLOUD = "ollama_cloud"
+    VLLM = "vllm"
+    OPENROUTER = "openrouter"
+    # Legacy fallbacks
     LOCAL = "local"
     CLOUD = "cloud"
 
