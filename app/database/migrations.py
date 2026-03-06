@@ -283,7 +283,7 @@ async def migrate_app_settings_data(engine: AsyncEngine) -> None:
         settings_data = json.loads(settings_json) if settings_json else {}
 
         # Default values for new retry settings
-        default_retry_settings = {"max_retries": 2, "retry_total_timeout_seconds": 1.0, "retry_base_delay_ms": 10}
+        default_retry_settings = {"max_retries": 5, "retry_total_timeout_seconds": 2.0, "retry_base_delay_ms": 50}
 
         # Add missing fields
         updated = False
