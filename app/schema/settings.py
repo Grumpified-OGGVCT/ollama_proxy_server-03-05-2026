@@ -51,6 +51,35 @@ class AppSettingsModel(BaseModel):
     enable_reasoning_routing: bool = Field(default=True, description="Enable reasoning model detection and prioritization")
 
     # Patch 7: Max Pull Size
+    # Part 2: Context Economics
+    context_reconstruction_window: int = Field(default=10, ge=5, le=20)
+    enable_firecracker_sandbox: bool = Field(default=False)
+    max_concurrent_sandboxes: int = Field(default=10, ge=1, le=100)
+
+    # Part 2: Operational Safety
+    idempotency_ttl_hours: int = Field(default=24, ge=1, le=72)
+    webhook_retry_max_attempts: int = Field(default=7, ge=1, le=10)
+
+    # Part 2: Economics
+    enable_cost_tracking: bool = Field(default=True)
+    default_user_budget_usd: float = Field(default=100.0, ge=0.0)
+
+    # Part 2: Phase Control
+    enforce_verification_checkpoints: bool = Field(default=True)
+    halt_on_verification_failure: bool = Field(default=True)
+
+    # Patch 7: Max Pull Size
+    # Part 3: God-Tier Optimizations
+    enable_semantic_cache: bool = Field(default=True)
+    semantic_cache_threshold: float = Field(default=0.98)
+    enable_speculative_decoding: bool = Field(default=True)
+    enable_complexity_triage: bool = Field(default=True)
+    gpu_thermal_threshold_c: int = Field(default=82)
+    enable_mmap_storage: bool = Field(default=True)
+    http2_keepalive_seconds: float = Field(default=300.0)
+    adaptive_batch_target_latency_ms: float = Field(default=5.0)
+
+    # Patch 7: Max Pull Size
     max_pull_size_gb: float = Field(default=50.0, ge=1.0, le=1000.0, description="Maximum model size allowed for install operations")
 
     # Retry configuration for backend requests - OPTIMIZED FOR SPEED
