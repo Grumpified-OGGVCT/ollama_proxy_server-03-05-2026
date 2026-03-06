@@ -1062,12 +1062,12 @@ The `"Proxy Features"` group in `get_all_models_grouped_by_server` serves the sa
 ```python
 @dataclass
 class RetryConfig:
-    max_retries: int = 5              # Maximum retry attempts after the first failure
-    total_timeout_seconds: float = 2.0 # Hard ceiling on total time across all attempts
-    base_delay_ms: int = 50           # Base exponential backoff delay in milliseconds
+    max_retries: int = 2              # Maximum retry attempts after the first failure
+    total_timeout_seconds: float = 1.0 # Hard ceiling on total time across all attempts
+    base_delay_ms: int = 10           # Base exponential backoff delay in milliseconds
 ```
 
-These defaults favor **resilience** while keeping retries bounded: exponential backoff fits five retries inside roughly two seconds, so transient cold starts get another chance without hammering the backend.
+These defaults are deliberately **aggressive** (low latency over high persistence) for the proxy use case. The rationale: a slow Ollama server that needs many retries is probably unhealthy; it's better to fail fast and let the load balancer try a different server.
 
 All three values are configurable through the admin Settings UI (`AppSettingsModel`) and take effect immediately on the next request without a restart.
 
@@ -1077,16 +1077,13 @@ All three values are configurable through the admin Settings UI (`AppSettingsMod
 delay_ms = base_delay_ms × (2 ^ attempt_index)
 
 attempt 0 → 1st try  (no delay before first attempt)
-attempt 1 → 2nd try  delay = 50 × 2^0 = 50 ms
-attempt 2 → 3rd try  delay = 50 × 2^1 = 100 ms
-attempt 3 → 4th try  delay = 50 × 2^2 = 200 ms
-attempt 4 → 5th try  delay = 50 × 2^3 = 400 ms
-attempt 5 → 6th try  delay = 50 × 2^4 = 800 ms
+attempt 1 → 2nd try  delay = 10 × 2^0 = 10 ms
+attempt 2 → 3rd try  delay = 10 × 2^1 = 20 ms
 ```
 
-With default settings (`max_retries=5`, `base_delay_ms=50`):
-- Maximum cumulative delay = 50 + 100 + 200 + 400 + 800 = 1,550 ms
-- This fits within the `total_timeout_seconds=2.0` budget, leaving room for request/response time
+With default settings (`max_retries=2`, `base_delay_ms=10`):
+- Maximum cumulative delay = 10 + 20 = 30 ms
+- This fits well within the `total_timeout_seconds=1.0` budget
 
 The actual sleep time is `min(calculated_delay, remaining_time_in_budget)`, ensuring the total budget is never exceeded.
 
@@ -1218,9 +1215,9 @@ All configurable values reside in `AppSettingsModel` (`app/schema/settings.py`) 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `model_update_interval_minutes` | `int` | `10` | How often the background task refreshes all server model lists. Minimum effective value is 1 minute. |
-| `max_retries` | `int` | `5` | Maximum retry attempts per backend request. Range: 0–20. |
-| `retry_total_timeout_seconds` | `float` | `2.0` | Hard wall-clock budget for all retry attempts. Range: 0.1–30.0. |
-| `retry_base_delay_ms` | `int` | `50` | Base delay for exponential backoff. Range: 1–5,000 ms. |
+| `max_retries` | `int` | `2` | Maximum retry attempts per backend request. Range: 0–20. |
+| `retry_total_timeout_seconds` | `float` | `1.0` | Hard wall-clock budget for all retry attempts. Range: 0.1–30.0. |
+| `retry_base_delay_ms` | `int` | `10` | Base delay for exponential backoff. Range: 1–5,000 ms. |
 
 ---
 

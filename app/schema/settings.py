@@ -89,11 +89,11 @@ class AppSettingsModel(BaseModel):
     # Patch 7: Max Pull Size
     max_pull_size_gb: float = Field(default=50.0, ge=1.0, le=1000.0, description="Maximum model size allowed for install operations")
 
-    # Retry configuration for backend requests
-    max_retries: int = Field(default=5, ge=0, le=20, description="Maximum number of retry attempts when a backend server request fails")
+    # Retry configuration for backend requests - OPTIMIZED FOR SPEED
+    max_retries: int = Field(default=2, ge=0, le=20, description="Maximum number of retry attempts when a backend server request fails")  # REDUCED from 5 to 2
     retry_loading_timeout_seconds: float = Field(default=15.0, ge=1.0, le=60.0, description="Extended timeout for cold model loads")
-    retry_total_timeout_seconds: float = Field(default=2.0, ge=0.1, le=30.0, description="Total time budget (in seconds) for all retry attempts")
-    retry_base_delay_ms: int = Field(default=50, ge=1, le=5000, description="Base delay in milliseconds for exponential backoff between retries")
+    retry_total_timeout_seconds: float = Field(default=1.0, ge=0.1, le=30.0, description="Total time budget (in seconds) for all retry attempts")  # REDUCED from 2.0 to 1.0
+    retry_base_delay_ms: int = Field(default=10, ge=1, le=5000, description="Base delay in milliseconds for exponential backoff between retries")  # REDUCED from 50 to 10
 
     # --- HTTPS/SSL Settings ---
     ssl_keyfile: Optional[str] = Field(default=None, description="Path to the SSL private key file (e.g., key.pem). Requires a restart.")
