@@ -891,7 +891,7 @@ code_keywords = ["def ", "class ", "import ", "const ", "let ", "var ",
                  "function ", "public static void", "int main("]
 contains_code = any(kw.lower() in prompt_content.lower() for kw in code_keywords)
 ```
-The prompt is extracted from either `body["prompt"]` (generate endpoint) or the last message's `content` field (chat endpoint). Content that is a list (multimodal message format) has its text parts joined for keyword scanning.
+The prompt is extracted from either `body["prompt"]` (generate endpoint) or the last message's `content` field (chat endpoint). If that `content` is a list (multimodal message format), only the **first text part** (`type == "text"`) is scanned; additional text items are ignored.
 
 **Signal 3: Fast model requested?**
 ```python
