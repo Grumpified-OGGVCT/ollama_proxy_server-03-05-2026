@@ -24,13 +24,7 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: 
     """
     # Subquery to find the last usage time for each user
     last_used_subq = (
-        select(
-            APIKey.user_id,
-            func.max(UsageLog.request_timestamp).label("last_used")
-        )
-        .join(UsageLog, APIKey.id == UsageLog.api_key_id)
-        .group_by(APIKey.user_id)
-        .subquery()
+        select(APIKey.user_id, func.max(UsageLog.request_timestamp).label("last_used")).join(UsageLog, APIKey.id == UsageLog.api_key_id).group_by(APIKey.user_id).subquery()
     )
 
     # Main query components
@@ -42,17 +36,12 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: 
             func.count(func.distinct(APIKey.id)).label("key_count"),
             func.count(UsageLog.id).label("request_count"),
             func.coalesce(func.sum(UsageLog.total_tokens), 0).label("total_tokens"),
-            last_used_subq.c.last_used
+            last_used_subq.c.last_used,
         )
         .outerjoin(APIKey, User.id == APIKey.user_id)
         .outerjoin(UsageLog, APIKey.id == UsageLog.api_key_id)
         .outerjoin(last_used_subq, User.id == last_used_subq.c.user_id)
-        .group_by(
-            User.id,
-            User.username,
-            User.is_admin,
-            last_used_subq.c.last_used
-        )
+        .group_by(User.id, User.username, User.is_admin, last_used_subq.c.last_used)
     )
 
     # Sorting logic
@@ -61,7 +50,7 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100, sort_by: 
         "key_count": func.count(func.distinct(APIKey.id)),
         "request_count": func.count(UsageLog.id),
         "total_tokens": func.coalesce(func.sum(UsageLog.total_tokens), 0),
-        "last_used": last_used_subq.c.last_used
+        "last_used": last_used_subq.c.last_used,
     }
     sort_column = sort_column_map.get(sort_by, User.username)
 
@@ -98,7 +87,7 @@ async def update_user(db: AsyncSession, user_id: int, username: str, password: O
     user.username = username
     if password:
         user.hashed_password = get_password_hash(password)
-    
+
     await db.commit()
     await db.refresh(user)
     return user

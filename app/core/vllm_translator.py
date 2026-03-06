@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 # --- Constants for Chain-of-Thought ---
-CHAIN_OF_THOUGHT_PROMPT = "When you are asked a question, first provide a step-by-step plan of how you will answer the question inside  tags. After the closing </think> tag, produce the final answer."
+CHAIN_OF_THOUGHT_PROMPT = (
+    "When you are asked a question, first provide a step-by-step plan of how you will answer the question inside  tags. After the closing </think> tag, produce the final answer."
+)
 
 THINK_TOOL = {
     "type": "function",
@@ -27,6 +29,7 @@ THINK_TOOL = {
         },
     },
 }
+
 
 # --- Request Translation ---
 def translate_ollama_to_vllm_chat(ollama_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -90,20 +93,19 @@ def translate_ollama_to_vllm_chat(ollama_payload: Dict[str, Any]) -> Dict[str, A
             if message.get("content") and isinstance(message["content"], str):
                 new_content = [{"type": "text", "text": message["content"]}]
                 for img_b64 in message["images"]:
-                    new_content.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
-                    })
+                    new_content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
                 message["content"] = new_content
             del message["images"]
 
     return vllm_payload
+
 
 def translate_ollama_to_vllm_embeddings(ollama_payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "model": ollama_payload.get("model"),
         "input": ollama_payload.get("prompt"),
     }
+
 
 # --- Response Translation ---
 async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], model_name: str) -> AsyncGenerator[bytes, None]:
@@ -124,12 +126,12 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
             dt_obj = datetime.now(timezone.utc)
         else:
             dt_obj = datetime.fromtimestamp(ts, tz=timezone.utc)
-        return dt_obj.isoformat().replace('+00:00', 'Z')
+        return dt_obj.isoformat().replace("+00:00", "Z")
 
     async for text_chunk in vllm_stream:
         buffer += text_chunk
-        lines = buffer.split('\n')
-        buffer = lines.pop() # Keep any partial line for the next chunk
+        lines = buffer.split("\n")
+        buffer = lines.pop()  # Keep any partial line for the next chunk
 
         for line in lines:
             if not line.strip():
@@ -149,10 +151,10 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                     "done": True,
                     "eval_count": eval_count,
                     "prompt_eval_count": prompt_eval_count,
-                    "eval_duration": int(eval_duration_ns)
+                    "eval_duration": int(eval_duration_ns),
                 }
-                yield (json.dumps(final_done_chunk) + '\n').encode('utf-8')
-                return # End of stream, stop the generator.
+                yield (json.dumps(final_done_chunk) + "\n").encode("utf-8")
+                return  # End of stream, stop the generator.
 
             if not line.startswith("data: "):
                 continue
@@ -178,13 +180,10 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
 
                         if fn_name and not in_tool_call:
                             in_tool_call = True
-                            is_think_tool = (fn_name == "think")
+                            is_think_tool = fn_name == "think"
                             start_tag = "<think>" if is_think_tool else f"<tool_call>\n{fn_name}("
 
-                            start_chunk = {
-                                "model": model_name, "created_at": get_iso_timestamp(created_ts),
-                                "message": {"role": "assistant", "content": start_tag}, "done": False
-                            }
+                            start_chunk = {"model": model_name, "created_at": get_iso_timestamp(created_ts), "message": {"role": "assistant", "content": start_tag}, "done": False}
                             yield (json.dumps(start_chunk) + "\n").encode("utf-8")
 
                         tool_call_part = t_call.get("function", {}).get("arguments", "")
@@ -211,21 +210,37 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
 
                         # If think block, we just emit the contents
                         if is_think_tool:
-                            yield (json.dumps({
-                                "model": model_name, "created_at": get_iso_timestamp(created_ts),
-                                "message": {"role": "assistant", "content": args}, "done": False,
-                            }) + "\n").encode("utf-8")
-                            yield (json.dumps({
-                                "model": model_name, "created_at": get_iso_timestamp(created_ts),
-                                "message": {"role": "assistant", "content": "</think>"}, "done": False
-                            }) + "\n").encode("utf-8")
+                            yield (
+                                json.dumps(
+                                    {
+                                        "model": model_name,
+                                        "created_at": get_iso_timestamp(created_ts),
+                                        "message": {"role": "assistant", "content": args},
+                                        "done": False,
+                                    }
+                                )
+                                + "\n"
+                            ).encode("utf-8")
+                            yield (
+                                json.dumps(
+                                    {"model": model_name, "created_at": get_iso_timestamp(created_ts), "message": {"role": "assistant", "content": "</think>"}, "done": False}
+                                )
+                                + "\n"
+                            ).encode("utf-8")
                             total_eval_text += args
                         else:
                             # It's a real tool block
-                            yield (json.dumps({
-                                "model": model_name, "created_at": get_iso_timestamp(created_ts),
-                                "message": {"role": "assistant", "content": args + ")\n</tool_call>\n"}, "done": False,
-                            }) + "\n").encode("utf-8")
+                            yield (
+                                json.dumps(
+                                    {
+                                        "model": model_name,
+                                        "created_at": get_iso_timestamp(created_ts),
+                                        "message": {"role": "assistant", "content": args + ")\n</tool_call>\n"},
+                                        "done": False,
+                                    }
+                                )
+                                + "\n"
+                            ).encode("utf-8")
                             total_eval_text += args
 
                     except Exception as e:
@@ -240,10 +255,12 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                 if content := delta.get("content"):
                     total_eval_text += content
                     ollama_chunk = {
-                        "model": model_name, "created_at": get_iso_timestamp(created_ts),
-                        "message": {"role": "assistant", "content": content}, "done": False,
+                        "model": model_name,
+                        "created_at": get_iso_timestamp(created_ts),
+                        "message": {"role": "assistant", "content": content},
+                        "done": False,
                     }
-                    yield (json.dumps(ollama_chunk) + '\n').encode('utf-8')
+                    yield (json.dumps(ollama_chunk) + "\n").encode("utf-8")
 
             except (json.JSONDecodeError, IndexError) as e:
                 logger.warning(f"Could not parse VLLM stream chunk: {line}. Error: {e}")
@@ -266,15 +283,17 @@ async def vllm_stream_to_ollama_stream(vllm_stream: AsyncGenerator[str, None], m
                 "done": True,
                 "eval_count": eval_count,
                 "prompt_eval_count": prompt_eval_count,
-                "eval_duration": int(eval_duration_ns)
+                "eval_duration": int(eval_duration_ns),
             }
-            yield (json.dumps(final_done_chunk) + '\n').encode('utf-8')
+            yield (json.dumps(final_done_chunk) + "\n").encode("utf-8")
 
 
 def translate_vllm_to_ollama_embeddings(vllm_payload: Dict[str, Any]) -> Dict[str, Any]:
     embedding_data = vllm_payload.get("data", [])
     embedding = embedding_data[0].get("embedding") if embedding_data else []
     return {"embedding": embedding}
+
+
 def translate_vllm_to_ollama_chat(vllm_payload: Dict[str, Any]) -> Dict[str, Any]:
     choices = vllm_payload.get("choices", [])
     message = choices[0].get("message", {"role": "assistant", "content": ""}) if choices else {"role": "assistant", "content": ""}
@@ -285,7 +304,7 @@ def translate_vllm_to_ollama_chat(vllm_payload: Dict[str, Any]) -> Dict[str, Any
         dt_obj = datetime.now(timezone.utc)
     else:
         dt_obj = datetime.fromtimestamp(created_ts, tz=timezone.utc)
-    created_at = dt_obj.isoformat().replace('+00:00', 'Z')
+    created_at = dt_obj.isoformat().replace("+00:00", "Z")
 
     usage = vllm_payload.get("usage", {})
 
@@ -296,7 +315,7 @@ def translate_vllm_to_ollama_chat(vllm_payload: Dict[str, Any]) -> Dict[str, Any
         "done": True,
         "done_reason": finish_reason,
         "prompt_eval_count": usage.get("prompt_tokens", 0),
-        "eval_count": usage.get("completion_tokens", 0)
+        "eval_count": usage.get("completion_tokens", 0),
     }
 
     return ollama_response

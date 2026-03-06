@@ -2,18 +2,14 @@
 import asyncio
 import json
 import re
-import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import aiohttp
 import aiofiles
 
-from app.models.catalog import (
-    LocalModel, CloudModel, CatalogState,
-    ModelTier, ModelSource, ModelStatus,
-    PerformanceMetrics
-)
+from app.models.catalog import LocalModel, CatalogState, ModelTier, ModelStatus, PerformanceMetrics
+
 
 class CatalogService:
     """
@@ -24,15 +20,10 @@ class CatalogService:
     """
 
     CACHE_TTL_SECONDS = 300  # 5 minutes for local
-    MODEL_NAME_PATTERN = re.compile(r'^[a-z0-9][a-z0-9_.-]*(/[a-z0-9][a-z0-9_.-]*)?(:[a-z0-9_.-]+)?$')
+    MODEL_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_.-]*(/[a-z0-9][a-z0-9_.-]*)?(:[a-z0-9_.-]+)?$")
     MAX_MODEL_NAME_LENGTH = 128
 
-    def __init__(
-        self,
-        ollama_base_urls: List[str],
-        cache_dir: Path,
-        hardware_profile: Optional[Any] = None
-    ):
+    def __init__(self, ollama_base_urls: List[str], cache_dir: Path, hardware_profile: Optional[Any] = None):
         self.ollama_urls = ollama_base_urls
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -54,7 +45,7 @@ class CatalogService:
         if not self.MODEL_NAME_PATTERN.match(model_name):
             raise ValueError(f"Invalid model name format: {model_name}")
 
-        if '..' in model_name or model_name.startswith('/'):
+        if ".." in model_name or model_name.startswith("/"):
             raise ValueError("Path traversal not allowed")
 
         return model_name
@@ -114,23 +105,14 @@ class CatalogService:
 
         return models
 
-    async def _parse_model(
-        self,
-        model_data: Dict[str, Any],
-        base_url: str,
-        session: aiohttp.ClientSession
-    ) -> Optional[LocalModel]:
+    async def _parse_model(self, model_data: Dict[str, Any], base_url: str, session: aiohttp.ClientSession) -> Optional[LocalModel]:
         """Parse single model from Ollama API response."""
         try:
             model_name = self._validate_model_name(model_data.get("name", ""))
 
             detail_data = {}
             try:
-                async with session.post(
-                    f"{base_url}/api/show",
-                    json={"name": model_name},
-                    timeout=aiohttp.ClientTimeout(total=3)
-                ) as detail_resp:
+                async with session.post(f"{base_url}/api/show", json={"name": model_name}, timeout=aiohttp.ClientTimeout(total=3)) as detail_resp:
                     if detail_resp.status == 200:
                         detail_data = await detail_resp.json()
             except aiohttp.ClientError:
@@ -139,6 +121,7 @@ class CatalogService:
             details = detail_data.get("details", {})
             param_size = details.get("parameter_size", "unknown")
 
+            model_info = detail_data.get("model_info", {})
             return LocalModel(
                 id=f"local:{model_name}",
                 name=model_name.split(":")[0],
@@ -150,8 +133,11 @@ class CatalogService:
                 family=details.get("family", "unknown"),
                 context_length=self._extract_context_length(detail_data),
                 capabilities=self._extract_capabilities(detail_data),
+                hidden_size=model_info.get("hidden_size") if "hidden_size" in model_info else model_info.get("llama.embedding_length"),
+                num_layers=model_info.get("num_layers") if "num_layers" in model_info else model_info.get("llama.block_count"),
+                vocab_size=model_info.get("vocab_size"),
                 installed_at=datetime.fromisoformat(model_data["modified_at"].replace("Z", "+00:00")) if "modified_at" in model_data else datetime.utcnow(),
-                status=ModelStatus.HEALTHY
+                status=ModelStatus.HEALTHY,
             )
 
         except (ValueError, KeyError, TypeError):
@@ -160,8 +146,8 @@ class CatalogService:
     def _determine_tier(self, param_size: str) -> ModelTier:
         """Map parameter size to tier for RTX 3060 optimization."""
         try:
-            if 'b' in param_size.lower():
-                size = float(param_size.lower().replace('b', '').replace('m', ''))
+            if "b" in param_size.lower():
+                size = float(param_size.lower().replace("b", "").replace("m", ""))
                 if size <= 3:
                     return ModelTier.NANO
                 elif size <= 8:
@@ -176,6 +162,12 @@ class CatalogService:
 
     def _extract_context_length(self, detail: Dict[str, Any]) -> int:
         """Extract context length from model details."""
+        # Priority 1: Explicit model_info.context_length (Ollama 0.4.0+)
+        model_info = detail.get("model_info", {})
+        if "context_length" in model_info:
+            return int(model_info["context_length"])
+
+        # Priority 2: Modelfile PARAMETER num_ctx
         modelfile = detail.get("modelfile", "")
         for line in modelfile.split("\n"):
             if "PARAMETER" in line and "num_ctx" in line:
@@ -184,15 +176,24 @@ class CatalogService:
                 except (ValueError, IndexError):
                     pass
 
+        # Priority 3: Updated family defaults for 2026
         family = detail.get("details", {}).get("family", "").lower()
-        defaults = {"llama": 4096, "mistral": 32768, "qwen": 32768, "gemma": 8192}
-        return defaults.get(family, 4096)
+        defaults = {
+            "llama": 128000,  # Llama 3/4 standard
+            "mistral": 128000,  # Mistral Large 3
+            "qwen": 128000,  # Qwen 2.5/3
+            "gemma": 8192,  # Gemma 2/3
+            "phi": 128000,  # Phi-4
+            "deepseek": 128000,  # DeepSeek V3/R1
+        }
+        return defaults.get(family, 4096)  # Conservative fallback
 
     def _extract_capabilities(self, detail: Dict[str, Any]) -> List[str]:
         """Extract capabilities from model metadata."""
         caps = []
         family = detail.get("details", {}).get("family", "").lower()
         name = detail.get("name", "").lower()
+        model_id = detail.get("id", "").lower() if "id" in detail else ""
 
         if "coder" in name or "code" in family:
             caps.append("coding")
@@ -200,6 +201,15 @@ class CatalogService:
             caps.append("vision")
         if "tool" in name:
             caps.append("tool_use")
+
+        reasoning_indicators = ["r1", "reasoning", "thought", "cot", "deepseek-r1", "qwen3-distill", "llama4-r", "kimi-k2-thinking"]
+        if any(ind in name or ind in model_id for ind in reasoning_indicators):
+            caps.append("reasoning")
+
+        tags = detail.get("tags", [])
+        if any("thinking" in str(tag).lower() or "reasoning" in str(tag).lower() for tag in tags):
+            if "reasoning" not in caps:
+                caps.append("reasoning")
 
         return caps
 
@@ -211,10 +221,10 @@ class CatalogService:
 
     async def _persist_to_disk(self) -> None:
         """Atomic write to disk for crash recovery."""
-        temp_file = self._state_file.with_suffix('.tmp')
+        temp_file = self._state_file.with_suffix(".tmp")
 
         try:
-            async with aiofiles.open(temp_file, 'w') as f:
+            async with aiofiles.open(temp_file, "w") as f:
                 await f.write(json.dumps(self._state.to_dict(), default=str, indent=2))
 
             temp_file.replace(self._state_file)
@@ -229,15 +239,13 @@ class CatalogService:
             return
 
         try:
-            with open(self._state_file, 'r') as f:
+            with open(self._state_file, "r") as f:
                 data = json.load(f)
 
             self._state = CatalogState.from_dict(data)
 
         except (json.JSONDecodeError, KeyError, ValueError):
-            self._state = CatalogState(
-                local_instance=self.ollama_urls[0] if self.ollama_urls else "http://localhost:11435"
-            )
+            self._state = CatalogState(local_instance=self.ollama_urls[0] if self.ollama_urls else "http://localhost:11435")
 
     def get_model_by_id(self, model_id: str) -> Optional[LocalModel]:
         """O(1) lookup by model ID."""
@@ -251,7 +259,15 @@ class CatalogService:
         """Filter models by capability."""
         return [m for m in self._state.local_models.values() if capability in m.capabilities]
 
-    def update_model_metrics(self, model_id: str, metrics: PerformanceMetrics) -> None:
+    async def update_model_metrics(self, model_id: str, metrics: PerformanceMetrics) -> None:
         """Update performance metrics for a model."""
         if model_id in self._state.local_models:
+            old_context = self._state.local_models[model_id].context_length
             self._state.local_models[model_id].metrics = metrics
+
+            # Check for context length mismatch indicating Modelfile update
+            if getattr(metrics, "context_length", None) and metrics.context_length != old_context:
+                self._state.local_models[model_id].context_length = metrics.context_length
+                await self._persist_to_disk()
+                # Assuming broadcast_invalidation logic exists or will just log
+                # await self._broadcast_invalidation(model_id, "context_length_changed")
